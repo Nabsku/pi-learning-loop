@@ -1,7 +1,8 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { LearningClassification, LearningRecord } from "./types.ts";
-import { classifyIssue, draftLearning, recommendTarget } from "./draft.ts";
+import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
 import { bounded, createLearning, saveLearning } from "./store.ts";
+import { loadConfig } from "./config.ts";
 
 type MessageEntry = ReturnType<ExtensionCommandContext["sessionManager"]["getEntries"]>[number];
 
@@ -190,14 +191,17 @@ export async function runInteractiveLearn(root: string, ctx: ExtensionCommandCon
   if (!issue) return { ok: false, message: "Cancelled. No learning created." };
 
   const desiredFutureBehavior = (await ctx.ui.editor("Future behavior rule input", "Optional: what should Pi do next time? Keep it durable, not one-off."))?.trim() || undefined;
-  const classification: LearningClassification = classifyIssue(`${issue}\n${picked.excerpt}\n${desiredFutureBehavior ?? ""}`);
+  const classification: LearningClassification = await classifyIssueWithModel(root, `${issue}\n${picked.excerpt}\n${desiredFutureBehavior ?? ""}`, ctx);
+  const config = loadConfig(root);
+  const target = recommendTarget(classification);
+  if (target.kind === "repo-agents") target.path = config.repoAgentsPath;
   const record = createLearning(root, {
-    source: { selector: "turn-id", turnId: picked.sourceTurnId ?? picked.id, role: picked.role, excerpt: bounded(picked.excerpt) },
+    source: { selector: "turn-id", turnId: picked.sourceTurnId ?? picked.id, role: picked.role, excerpt: bounded(picked.excerpt, config.maxExcerptChars) },
     issue: { description: bounded(issue, 1000), desiredFutureBehavior: desiredFutureBehavior ? bounded(desiredFutureBehavior, 1000) : undefined },
     classification,
-    recommendedTarget: recommendTarget(classification),
+    recommendedTarget: target,
   });
-  record.draft = draftLearning(root, record);
+  record.draft = await draftLearning(root, record, ctx);
   saveLearning(root, record);
 
   return { ok: true, record, message: renderReview(record) };

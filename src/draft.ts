@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { completeSimple } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { LearningClassification, LearningDraft, LearningRecord, LearningTargetKind } from "./types.ts";
+import { loadConfig, type ModelOverride } from "./config.ts";
 
 const CLASSIFIERS: Array<{ classification: LearningClassification; terms: RegExp; rule: string; rationale: string }> = [
   { classification: "verification_overclaim", terms: /test|verify|verification|passed|green|checked|ran/i, rule: "- Do not claim a check passed unless you ran the exact command and can report the result.", rationale: "The issue describes overclaiming or weak verification." },
@@ -12,9 +16,48 @@ const CLASSIFIERS: Array<{ classification: LearningClassification; terms: RegExp
 
 const TRANSIENT = /network timeout|rate limit|429|temporary|flaky|one-off|permission denied|install missing/i;
 
+type DraftCompletion = (model: Model<any>, context: Context, options?: SimpleStreamOptions) => Promise<AssistantMessage>;
+export type DraftLearningDeps = { complete?: DraftCompletion };
+
 export function classifyIssue(description: string): LearningClassification {
   if (TRANSIENT.test(description)) return "transient";
   return CLASSIFIERS.find((item) => item.terms.test(description))?.classification ?? "other";
+}
+
+const CLASSIFICATION_VALUES: LearningClassification[] = ["verification_overclaim", "scope_drift", "unsafe_edit", "wrong_tool", "context_miss", "stale_data", "transient", "other"];
+
+function parseClassificationResponse(text: string): LearningClassification | undefined {
+  const jsonText = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text;
+  try {
+    const parsed = JSON.parse(jsonText) as { classification?: unknown };
+    return CLASSIFICATION_VALUES.includes(parsed.classification as LearningClassification) ? parsed.classification as LearningClassification : undefined;
+  } catch {
+    const value = CLASSIFICATION_VALUES.find((item) => new RegExp(`\\b${item}\\b`, "i").test(text));
+    return value;
+  }
+}
+
+export async function classifyIssueWithModel(root: string, description: string, ctx?: ExtensionContext, deps: DraftLearningDeps = {}): Promise<LearningClassification> {
+  const deterministic = classifyIssue(description);
+  if (!ctx?.modelRegistry) return deterministic;
+  const config = loadConfig(root);
+  const modelRef = parseModelRef(config.modelOverrides.classifyIssue?.model);
+  if (!modelRef) return deterministic;
+  const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
+  if (!model) return deterministic;
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) return deterministic;
+  const complete = deps.complete ?? completeSimple;
+  const response = await complete(model, {
+    systemPrompt: `Classify an agent learning issue. Return only JSON: {"classification":"..."}. Allowed classifications: ${CLASSIFICATION_VALUES.join(", ")}.`,
+    messages: [{ role: "user", timestamp: Date.now(), content: description }],
+  }, {
+    reasoning: config.modelOverrides.classifyIssue?.thinkingLevel,
+    apiKey: auth.apiKey,
+    headers: auth.headers,
+  });
+  if (response.stopReason === "error" || response.stopReason === "aborted") return deterministic;
+  return parseClassificationResponse(textFromAssistant(response)) ?? deterministic;
 }
 
 export function recommendTarget(classification: LearningClassification): { kind: LearningTargetKind; path: string } {
@@ -32,15 +75,81 @@ function similarRule(existing: string, proposed: string): string | null {
   return hits.length >= Math.min(5, normalized.length) ? proposed : null;
 }
 
-export function draftLearning(root: string, record: LearningRecord): LearningDraft {
+function deterministicDraft(root: string, record: LearningRecord): LearningDraft {
+  const config = loadConfig(root);
   const classification = record.classification === "other" ? classifyIssue(record.issue.description) : record.classification;
   const classifier = CLASSIFIERS.find((item) => item.classification === classification);
   const proposedText = classifier?.rule ?? "- When a mistake is identified, generalize the root behavior into a short rule and verify the rule is not already covered before adding it.";
-  const searched = ["AGENTS.md", ".pi/workflows.json"];
+  const searched = [config.repoAgentsPath, ".pi/workflows.json"];
   const existing = searched.map((rel) => readIfExists(join(root, rel))).join("\n");
   const duplicate = similarRule(existing, proposedText);
   if (classification === "transient") {
     return { section: "Learning Notes", proposedText: "", rationale: "This looks transient or environment-specific; save as a note instead of adding prompt policy.", duplicateCheck: { searched, similarExistingRule: null }, risk: "medium" };
   }
   return { section: "Agent Learnings", proposedText, rationale: classifier?.rationale ?? "The issue should become a concise durable behavior rule.", duplicateCheck: { searched, similarExistingRule: duplicate }, risk: duplicate ? "medium" : "low" };
+}
+
+function parseModelRef(ref: string | undefined): { provider: string; modelId: string } | undefined {
+  if (!ref) return undefined;
+  const slash = ref.indexOf("/");
+  if (slash <= 0 || slash === ref.length - 1) return undefined;
+  return { provider: ref.slice(0, slash), modelId: ref.slice(slash + 1) };
+}
+
+function textFromAssistant(message: AssistantMessage): string {
+  return message.content.map((part) => part.type === "text" ? part.text : "").join("\n").trim();
+}
+
+function parseDraftResponse(text: string, fallback: LearningDraft): LearningDraft | undefined {
+  const jsonText = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text;
+  try {
+    const parsed = JSON.parse(jsonText) as Partial<LearningDraft>;
+    if (typeof parsed.proposedText !== "string" || !parsed.proposedText.trim()) return undefined;
+    return {
+      section: typeof parsed.section === "string" && parsed.section.trim() ? parsed.section.trim() : fallback.section,
+      proposedText: parsed.proposedText.trim(),
+      rationale: typeof parsed.rationale === "string" && parsed.rationale.trim() ? parsed.rationale.trim() : fallback.rationale,
+      duplicateCheck: fallback.duplicateCheck,
+      risk: parsed.risk === "medium" || parsed.risk === "high" || parsed.risk === "low" ? parsed.risk : fallback.risk,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function modelDraft(root: string, record: LearningRecord, fallback: LearningDraft, override: ModelOverride | undefined, ctx: ExtensionContext, deps: DraftLearningDeps): Promise<LearningDraft | undefined> {
+  const modelRef = parseModelRef(override?.model);
+  if (!modelRef) return undefined;
+  const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
+  if (!model) return undefined;
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) return undefined;
+  const complete = deps.complete ?? completeSimple;
+  const response = await complete(model, {
+    systemPrompt: "Draft one durable, repo-local agent learning rule. Return only JSON with proposedText, rationale, and risk (low|medium|high). Keep proposedText a single markdown bullet starting with '- '. Do not include secrets or one-off task facts.",
+    messages: [{
+      role: "user",
+      timestamp: Date.now(),
+      content: JSON.stringify({
+        issue: record.issue,
+        source: record.source,
+        classification: record.classification,
+        recommendedTarget: record.recommendedTarget,
+        fallbackRule: fallback.proposedText,
+      }),
+    }],
+  }, {
+    reasoning: override?.thinkingLevel,
+    apiKey: auth.apiKey,
+    headers: auth.headers,
+  });
+  if (response.stopReason === "error" || response.stopReason === "aborted") return undefined;
+  return parseDraftResponse(textFromAssistant(response), fallback);
+}
+
+export async function draftLearning(root: string, record: LearningRecord, ctx?: ExtensionContext, deps: DraftLearningDeps = {}): Promise<LearningDraft> {
+  const config = loadConfig(root);
+  const fallback = deterministicDraft(root, record);
+  if (!ctx?.modelRegistry || record.classification === "transient") return fallback;
+  return await modelDraft(root, record, fallback, config.modelOverrides.draftRule, ctx, deps) ?? fallback;
 }

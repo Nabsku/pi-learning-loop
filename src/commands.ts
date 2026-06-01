@@ -1,8 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { applyRepoAgentsRule } from "./apply.ts";
-import { classifyIssue, draftLearning, recommendTarget } from "./draft.ts";
+import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
 import { runInteractiveLearn } from "./interactive.ts";
 import { bounded, createLearning, listLearnings, moveLearning, readLearning, repoRoot, saveLearning } from "./store.ts";
+import { loadConfig } from "./config.ts";
+import { initConfig } from "./config-file.ts";
 
 function renderRecord(record: ReturnType<typeof readLearning>): string {
   const lines = [
@@ -18,19 +20,25 @@ function renderRecord(record: ReturnType<typeof readLearning>): string {
 
 export function registerLearningCommand(pi: ExtensionAPI) {
   pi.registerCommand("learn", {
-    description: "Learning loop: pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]",
+    description: "Learning loop: pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config",
     getArgumentCompletions(prefix) {
       const first = prefix.trimStart().split(/\s/)[0] ?? "";
-      return ["pick", "note", "draft", "show", "pending", "approve", "reject", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
+      return ["pick", "note", "draft", "show", "pending", "approve", "reject", "init-config", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
     },
     async handler(args, ctx) {
       const [subRaw, ...rest] = args.trim().split(/\s/).filter(Boolean);
       const sub = subRaw ?? "help";
       const root = repoRoot(ctx.cwd);
+      const config = loadConfig(root);
       const send = (content: string, details?: unknown) => pi.sendMessage({ customType: "learning-loop", display: true, content, details });
 
       if (sub === "help") {
-        send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]\n\nUse /learn pick for the non-intrusive TUI flow: select a turn, describe the mistake, review the draft, then approve explicitly.");
+        send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config\n\nUse /learn pick for the non-intrusive TUI flow: select a turn, describe the mistake, review the draft, then approve explicitly.");
+        return;
+      }
+      if (sub === "init-config") {
+        const result = initConfig(root);
+        send(result.message, result);
         return;
       }
       if (sub === "pick" || sub === "last") {
@@ -41,8 +49,10 @@ export function registerLearningCommand(pi: ExtensionAPI) {
       if (sub === "note") {
         const issue = rest.join(" ").trim();
         if (!issue) { send("usage: /learn note <what went wrong>"); return; }
-        const classification = classifyIssue(issue);
-        const record = createLearning(root, { source: { selector: "manual", role: "unknown", excerpt: bounded(issue) }, issue: { description: bounded(issue, 1000) }, classification, recommendedTarget: recommendTarget(classification) });
+        const classification = await classifyIssueWithModel(root, issue, ctx);
+        const target = recommendTarget(classification);
+        if (target.kind === "repo-agents") target.path = config.repoAgentsPath;
+        const record = createLearning(root, { source: { selector: "manual", role: "unknown", excerpt: bounded(issue, config.maxExcerptChars) }, issue: { description: bounded(issue, 1000) }, classification, recommendedTarget: target });
         send(`created: ${record.id}\nnext: /learn draft ${record.id}`, record);
         return;
       }
@@ -62,7 +72,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
         const id = rest[0];
         if (!id) { send("usage: /learn draft <id>"); return; }
         const record = readLearning(root, id);
-        record.draft = draftLearning(root, record);
+        record.draft = await draftLearning(root, record, ctx);
         saveLearning(root, record);
         send(`${renderRecord(record)}\n\nApprove with: /learn approve ${record.id}`, record);
         return;
@@ -88,7 +98,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
         send(`rejected: ${id}`, record);
         return;
       }
-      send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]");
+      send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config");
     },
   });
 }

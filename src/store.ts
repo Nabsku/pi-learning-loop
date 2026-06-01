@@ -2,13 +2,14 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { LearningRecord, LearningStatus } from "./types.ts";
+import { loadConfig } from "./config.ts";
 
 export function repoRoot(cwd?: string): string {
   return resolve(cwd ?? process.cwd());
 }
 
 export function learningDir(root: string, status?: LearningStatus): string {
-  const base = join(root, ".pi", "learnings");
+  const base = resolve(root, loadConfig(root).learningsDir);
   return status ? join(base, status) : base;
 }
 
