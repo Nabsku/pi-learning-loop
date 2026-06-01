@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { applyRepoAgentsRule } from "./apply.ts";
 import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
-import { runInteractiveLearn } from "./interactive.ts";
+import { runDraftReview, runInteractiveLearn } from "./interactive.ts";
 import { bounded, createLearning, listLearnings, moveLearning, readLearning, repoRoot, saveLearning } from "./store.ts";
 import { loadConfig } from "./config.ts";
 
@@ -19,10 +19,12 @@ function renderRecord(record: ReturnType<typeof readLearning>): string {
 
 export function registerLearningCommand(pi: ExtensionAPI) {
   pi.registerCommand("learn", {
-    description: "Learning loop: pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]",
+    description: "Learning loop: pick | review | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]",
     getArgumentCompletions(prefix) {
-      const first = prefix.trimStart().split(/\s/)[0] ?? "";
-      return ["pick", "note", "draft", "show", "pending", "approve", "reject", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
+      const trimmedStart = prefix.trimStart();
+      if (/\s/.test(trimmedStart)) return null;
+      const first = trimmedStart;
+      return ["pick", "review", "note", "draft", "show", "pending", "approve", "reject", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
     },
     async handler(args, ctx) {
       const [subRaw, ...rest] = args.trim().split(/\s/).filter(Boolean);
@@ -32,11 +34,16 @@ export function registerLearningCommand(pi: ExtensionAPI) {
       const send = (content: string, details?: unknown) => pi.sendMessage({ customType: "learning-loop", display: true, content, details });
 
       if (sub === "help") {
-        send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]\n\nUse /learn pick for the non-intrusive TUI flow: select a turn, describe the mistake, review the draft, then approve explicitly.");
+        send("usage: /learn pick | review | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]\n\nUse /learn pick to create a draft from a bad turn. Use /learn review to pick, inspect, approve, or reject pending drafts.");
         return;
       }
       if (sub === "pick" || sub === "last") {
         const result = await runInteractiveLearn(root, ctx);
+        send(result.message, result.ok ? result.record : result);
+        return;
+      }
+      if (sub === "review" || sub === "drafts") {
+        const result = await runDraftReview(root, ctx);
         send(result.message, result.ok ? result.record : result);
         return;
       }
@@ -92,7 +99,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
         send(`rejected: ${id}`, record);
         return;
       }
-      send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]");
+      send("usage: /learn pick | review | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]");
     },
   });
 }

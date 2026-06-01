@@ -8,6 +8,7 @@ Approval-gated learning loop for Pi.
 
 ```text
 /learn pick
+/learn review
 /learn note <what went wrong>
 /learn draft <id>
 /learn show <id>
@@ -16,7 +17,9 @@ Approval-gated learning loop for Pi.
 /learn reject <id> [reason]
 ```
 
-`/learn pick` is the preferred interactive path. It opens only when invoked, lets you select a recent turn, asks for a short issue description plus optional future behavior, then creates a pending draft. It never writes `AGENTS.md`; approval still happens via `/learn approve <id>`.
+`/learn pick` is the preferred interactive path. It opens only when invoked, lets you select a recent turn with longer evidence previews, asks for a short issue description plus optional future behavior, then creates a pending draft. It never writes `AGENTS.md`; approval still happens via `/learn approve <id>` or the `/learn review` draft picker.
+
+`/learn review` opens pending drafts, shows a compact picker, then opens the full draft/source context in a scrollable editor before asking to approve, reject, or cancel.
 
 ## Config
 

@@ -26,6 +26,7 @@ const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-config-"));
 const configPath = join(root, ".pi/learning-loop.json");
 assert(!commands.learn.description?.includes("init-config"), "help description should not advertise init-config");
 assert(!commands.learn.getArgumentCompletions?.("init").some((item) => item.value === "init-config"), "completions should not include init-config");
+assert(commands.learn.getArgumentCompletions?.("note test") === null, "completions should not replace note arguments");
 await handlers.resources_discover?.[0]?.({ cwd: root, reason: "startup" }, { cwd: root });
 assert(existsSync(configPath), "loading the plugin should create .pi/learning-loop.json");
 const config = JSON.parse(readFileSync(configPath, "utf8"));

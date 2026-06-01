@@ -1,7 +1,8 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { LearningClassification, LearningRecord } from "./types.ts";
 import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
-import { bounded, createLearning, saveLearning } from "./store.ts";
+import { bounded, createLearning, listLearnings, moveLearning, saveLearning } from "./store.ts";
+import { applyRepoAgentsRule } from "./apply.ts";
 import { loadConfig } from "./config.ts";
 
 type MessageEntry = ReturnType<ExtensionCommandContext["sessionManager"]["getEntries"]>[number];
@@ -44,7 +45,7 @@ function roleFromMessage(message: unknown): PickableTurn["role"] {
 function excerptFromEntry(entry: MessageEntry): string {
   if (entry.type !== "message") return "";
   const message = entry.message as { content?: unknown; toolName?: string; command?: string; output?: string };
-  return bounded(textFromContent(message.content) || message.output || message.command || "(no text)", 420).replace(/\s+/g, " ").trim();
+  return bounded(textFromContent(message.content) || message.output || message.command || "(no text)", 1200).replace(/\s+/g, " ").trim();
 }
 
 function issueSignal(text: string): boolean {
@@ -169,6 +170,66 @@ function renderReview(record: LearningRecord): string {
     `approve with: /learn approve ${record.id}`,
     `reject with: /learn reject ${record.id} <reason>`,
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function renderFullDraft(record: LearningRecord): string {
+  return [
+    `# ${record.id}`,
+    `status: ${record.status}`,
+    `classification: ${record.classification}`,
+    `target: ${record.recommendedTarget.kind}:${record.recommendedTarget.path}`,
+    "",
+    "issue:",
+    record.issue.description,
+    record.issue.desiredFutureBehavior ? `\nfuture behavior:\n${record.issue.desiredFutureBehavior}` : undefined,
+    "",
+    "source excerpt:",
+    record.source.excerpt,
+    "",
+    "draft rule:",
+    record.draft?.proposedText || "(none)",
+    "",
+    "rationale:",
+    record.draft?.rationale || "(none)",
+    "",
+    `approve: /learn approve ${record.id}`,
+    `reject: /learn reject ${record.id} <reason>`,
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function formatDraftLabel(record: LearningRecord): string {
+  const rule = record.draft?.proposedText || "(no draft yet)";
+  return `${record.id} · ${record.classification} · ${bounded(rule, 180).replace(/\s+/g, " ")} · ${bounded(record.issue.description, 120).replace(/\s+/g, " ")}`;
+}
+
+export async function runDraftReview(root: string, ctx: ExtensionCommandContext): Promise<{ ok: true; message: string; record: LearningRecord } | { ok: false; message: string }> {
+  if (!ctx.hasUI) return { ok: false, message: "UI draft review unavailable in this mode. Use: /learn pending, /learn show <id>, /learn approve <id>, or /learn reject <id>." };
+  const drafts = listLearnings(root).filter((record) => record.draft);
+  if (drafts.length === 0) return { ok: false, message: "No pending drafts. Use /learn draft <id> first." };
+
+  const labels = drafts.map(formatDraftLabel);
+  const pickedLabel = await ctx.ui.select("Select draft to review", labels);
+  if (!pickedLabel) return { ok: false, message: "Cancelled. No draft selected." };
+  const record = drafts[labels.indexOf(pickedLabel)];
+  if (!record) return { ok: false, message: "Cancelled. Selected draft was not found." };
+
+  await ctx.ui.editor("Review learning draft (full text)", renderFullDraft(record));
+  const action = await ctx.ui.select("Approve or reject this draft", ["Approve", "Reject", "Cancel"]);
+  if (action === "Approve") {
+    const result = applyRepoAgentsRule(root, record);
+    if (result.applied) {
+      record.appliedAt = new Date().toISOString();
+      moveLearning(root, record, "applied");
+    }
+    return { ok: true, record, message: result.message };
+  }
+  if (action === "Reject") {
+    const reason = (await ctx.ui.input("Reject reason", "Optional reason"))?.trim() || undefined;
+    record.rejectionReason = reason;
+    moveLearning(root, record, "rejected");
+    return { ok: true, record, message: `rejected: ${record.id}` };
+  }
+  return { ok: false, message: "Cancelled. Draft left pending." };
 }
 
 export async function runInteractiveLearn(root: string, ctx: ExtensionCommandContext): Promise<{ ok: true; record: LearningRecord; message: string } | { ok: false; message: string }> {
