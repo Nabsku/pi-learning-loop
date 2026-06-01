@@ -49,6 +49,9 @@ const ctx = {
         return "Apply rule to AGENTS.md";
       }
       if (title.includes("Confirm applying")) {
+        assert(title.includes("Will edit: AGENTS.md"), "confirmation should show exact file edit behavior");
+        assert(title.includes("Section: ## Agent Learnings"), "confirmation should show target section");
+        assert(title.includes("Change: append single bullet if not already present"), "confirmation should show exact change behavior");
         assert(options[0] === "Keep pending / Back", "confirmation safe/back choice should be first");
         assert(options.includes("Apply rule to AGENTS.md"), "confirmation should require explicit apply");
         return "Apply rule to AGENTS.md";
@@ -57,10 +60,13 @@ const ctx = {
     },
     async editor(title: string, prefill: string) {
       uiCalls.push(`editor:${title}:${prefill.length}`);
-      assert(title.includes("Review learning draft"), "review picker should show a full draft editor/overflow view");
+      assert(title === "Read-only preview: learning draft", "review picker should show a read-only draft preview");
       assert(prefill.includes("source excerpt:"), "full draft view should include source excerpt");
       assert(prefill.includes("Do not claim a check passed"), "full draft view should include proposed rule");
       assert(prefill.includes("lots of surrounding context"), "full draft view should preserve long context instead of select-label truncation");
+      assert(prefill.includes("risk:"), "full draft view should include risk");
+      assert(prefill.includes("duplicate:"), "full draft view should include duplicate check");
+      assert(prefill.includes("searched paths:"), "full draft view should include searched paths");
       return prefill;
     },
   },
@@ -71,7 +77,7 @@ const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
 assert(agents.includes("Do not claim a check passed"), "approving through review picker should apply draft");
 assert(existsSync(join(root, ".pi/learnings/applied", `${id}.json`)), "review-approved draft should move to applied");
 assert(uiCalls.some((call) => call.startsWith("select:Select draft")), "draft picker should be used");
-assert(uiCalls.some((call) => call.startsWith("editor:Review learning draft")), "full overflow review should be used");
+assert(uiCalls.some((call) => call.startsWith("editor:Read-only preview: learning draft")), "full overflow review should be used");
 
 const rejectRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-review-reject-"));
 writeFileSync(join(rejectRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");

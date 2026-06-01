@@ -13,13 +13,13 @@ Approval-gated learning loop for Pi.
 /learn draft <id>
 /learn show <id>
 /learn pending
-/learn approve <id>
+/learn approve <id> --confirm
 /learn reject <id> [reason]
 ```
 
-`/learn pick` is the preferred interactive path. It opens only when invoked, lets you select a recent turn with longer evidence previews, asks for a short issue description plus optional future behavior, then creates a pending draft. It never writes `AGENTS.md`; approval still happens via `/learn approve <id>` or the `/learn review` draft picker.
+`/learn pick` is the preferred interactive path. It opens only when invoked, lets you select a recent turn with longer evidence previews, asks for a short issue description plus optional future behavior, then creates a pending draft. It never writes `AGENTS.md`; approval still happens via `/learn approve <id> --confirm` or the `/learn review` draft picker.
 
-`/learn note <what went wrong>` is the quick-capture path. It classifies and drafts immediately, then sends you to `/learn review` for approval.
+`/learn note <what went wrong>` is the quick-capture path. It classifies and drafts immediately, then sends you to `/learn review` for approval. It creates a pending learning and proposed rule only; no repo rule is applied until review approval or `/learn approve <id> --confirm`.
 
 `/learn review` opens pending drafts, shows a compact picker, then opens the full draft/source context in a scrollable editor before asking to approve, reject, or cancel.
 
@@ -57,7 +57,7 @@ Unsafe paths that escape the repo are ignored and fall back to defaults.
 
 ## Safety model
 
-- No silent writes to `AGENTS.md`.
+- No silent writes to the configured repo agents file; direct CLI approval requires `--confirm`.
 - Repo-local learning artifacts live under `.pi/learnings/` by default.
 - Approved repo rules are inserted under `## Agent Learnings` in the configured repo agents file.
 - Global Pi files are intentionally not implemented yet.

@@ -25,7 +25,7 @@ const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-"));
 writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n\n## Verification\n\n", "utf8");
 
 await commands.learn.handler("note Pi claimed tests passed without running the command", { cwd: root });
-assert(messages.at(-1)?.content.includes("drafted: learn_"), "note should create and draft a learning");
+assert(messages.at(-1)?.content.includes("pending learning created: learn_"), "note should create and draft a learning");
 const id = /learn_[A-Za-z0-9_Z]+_[a-f0-9]{6}/.exec(messages.at(-1)?.content ?? "")?.[0];
 assert(id, "created message should include id");
 assert(existsSync(join(root, ".pi/learnings/pending", `${id}.json`)), "pending record should be written");
@@ -34,7 +34,7 @@ await commands.learn.handler(`draft ${id}`, { cwd: root });
 assert(messages.at(-1)?.content.includes("Do not claim a check passed"), "draft should propose verification rule");
 assert(!readFileSync(join(root, "AGENTS.md"), "utf8").includes("Do not claim a check passed"), "draft must not write AGENTS");
 
-await commands.learn.handler(`approve ${id}`, { cwd: root });
+await commands.learn.handler(`approve ${id} --confirm`, { cwd: root });
 const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
 assert(agents.includes("## Agent Learnings"), "approval should add Agent Learnings section");
 assert(agents.includes("Do not claim a check passed"), "approval should apply rule");

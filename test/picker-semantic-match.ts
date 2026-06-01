@@ -27,9 +27,9 @@ function ctxFor(entries: Array<{ id: string; role: "user" | "assistant" | "tool"
     { id: "t_patch", role: "tool", content: "patch failed: old_string not found in README.md" },
     { id: "a2", role: "assistant", content: "I updated README.md. Lint still fails." },
   ]), 10);
-  const claim = turns.find((turn) => turn.id === "a2");
+  const claim = turns.find((turn) => turn.id === "__last_assistant__" && turn.sourceTurnId === "a2");
   assert(claim?.evidenceTurnId === "t_patch", "file update claim should pair to the matching patch/write failure");
-  assert(claim?.label.includes("README.md"), "file update evidence should include the file failure excerpt");
+  assert(claim?.evidenceExcerpt?.includes("README.md"), "file update evidence should include the file failure excerpt");
   assert((claim?.evidenceTurnId as string | undefined) !== "t_lint", "file update claim should not pair to unrelated lint failure");
 }
 
@@ -41,9 +41,9 @@ function ctxFor(entries: Array<{ id: string; role: "user" | "assistant" | "tool"
     { id: "t_test", role: "tool", content: "pnpm test failed with exit code 1" },
     { id: "a2", role: "assistant", content: "Tests passed. README still needs work." },
   ]), 10);
-  const claim = turns.find((turn) => turn.id === "a2");
+  const claim = turns.find((turn) => turn.id === "__last_assistant__" && turn.sourceTurnId === "a2");
   assert(claim?.evidenceTurnId === "t_test", "test success claim should pair to the matching test failure");
-  assert(claim?.label.includes("pnpm test failed"), "test claim evidence should include test failure output");
+  assert(claim?.evidenceExcerpt?.includes("pnpm test failed"), "test claim evidence should include test failure output");
   assert((claim?.evidenceTurnId as string | undefined) !== "t_patch", "test success claim should not pair to unrelated file patch failure");
 }
 

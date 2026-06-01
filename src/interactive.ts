@@ -2,7 +2,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { LearningClassification, LearningRecord } from "./types.ts";
 import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
 import { bounded, createLearning, listLearnings, moveLearning, saveLearning } from "./store.ts";
-import { applyRepoAgentsRule } from "./apply.ts";
+import { applyRepoAgentsRule, resolveRepoAgentsPath } from "./apply.ts";
 import { loadConfig } from "./config.ts";
 
 type MessageEntry = ReturnType<ExtensionCommandContext["sessionManager"]["getEntries"]>[number];
@@ -119,10 +119,15 @@ function reasonCategory(turn: PickableTurn | Omit<PickableTurn, "label">): strin
   return "general";
 }
 
-function formatTurnLabel(turn: Omit<PickableTurn, "label">): string {
+function formatTurnLabel(turn: Omit<PickableTurn, "label">, turnsAgo = 0): string {
+  const disambiguator = `#${turn.id}`;
   const prefix = turn.id === "__last_assistant__" ? "[last]" : turn.reason ? "[likely]" : "[recent]";
-  const evidence = turn.evidenceExcerpt ? ` · ev: ${bounded(turn.evidenceExcerpt, 48)}` : "";
-  return `${prefix} ${turn.role} · ${reasonCategory(turn)} · ${bounded(turn.excerpt, 96)}${evidence}`;
+  if (prefix === "[last]") return "[last] last assistant response";
+  if (prefix === "[likely]" && turn.reason?.startsWith("after tool failure")) return `[likely] claimed success after failed tool · assistant · ${disambiguator}`;
+  if (prefix === "[likely]" && turn.reason === "verification claim") return `[likely] verification claim · ${turn.role} · ${disambiguator}`;
+  if (prefix === "[likely]" && turn.reason === "tool failure") return `[likely] failed tool output · ${turn.role} · ${disambiguator}`;
+  const plural = turnsAgo === 1 ? "turn" : "turns";
+  return `[recent] ${turn.role} response · ${turnsAgo} ${plural} ago · ${disambiguator}`;
 }
 
 function renderTurnPreview(turn: PickableTurn): string {
@@ -170,32 +175,36 @@ export function recentPickableTurns(ctx: ExtensionCommandContext, limit = 18): P
       evidenceTurnId: contradictingTool?.id,
       evidenceExcerpt: contradictingTool?.excerpt,
     } satisfies Omit<PickableTurn, "label">;
-    return { ...pickable, label: formatTurnLabel(pickable) } satisfies PickableTurn;
+    return { ...pickable, label: formatTurnLabel(pickable, rawTurns.length - 1 - index) } satisfies PickableTurn;
   });
 
   const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
   const fastPath = lastAssistant
-    ? [{ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, reason: undefined, label: formatTurnLabel({ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, reason: undefined }) }]
+    ? [{ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, label: formatTurnLabel({ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000 }) }]
     : [];
 
-  const ranked = [...turns].sort((a, b) => b.score - a.score).slice(0, limit);
-  return [...ranked, ...fastPath];
+  const dedupedTurns = lastAssistant ? turns.filter((turn) => turn.id !== lastAssistant.id) : turns;
+  const ranked = [...dedupedTurns].sort((a, b) => b.score - a.score).slice(0, limit);
+  return [...fastPath, ...ranked];
 }
 
 function renderReview(record: LearningRecord): string {
   return [
     `created: ${record.id}`,
+    `pending learning/proposed rule created; no repo rule applied yet.`,
     `source: ${record.source.role} turn ${record.source.turnId ?? "unknown"}`,
     `issue: ${record.issue.description}`,
     record.issue.desiredFutureBehavior ? `future: ${record.issue.desiredFutureBehavior}` : undefined,
     "",
     "review:",
     `target: ${record.recommendedTarget.kind}:${record.recommendedTarget.path}`,
-    `classification: ${record.classification}`,
+    `classification: ${classificationLabel(record.classification)}`,
     `rule: ${record.draft?.proposedText ?? "(none)"}`,
     `rationale: ${record.draft?.rationale ?? "(none)"}`,
     "",
-    `approve with: /learn approve ${record.id}`,
+    `next: /learn review`,
+    `target if approved: ${record.recommendedTarget.path}`,
+    `approve with: /learn approve ${record.id} --confirm`,
     `reject with: /learn reject ${record.id} <reason>`,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -204,8 +213,11 @@ function renderFullDraft(record: LearningRecord): string {
   return [
     `# ${record.id}`,
     `status: ${record.status}`,
-    `classification: ${record.classification}`,
+    `classification: ${classificationLabel(record.classification)}`,
     `target: ${record.recommendedTarget.kind}:${record.recommendedTarget.path}`,
+    `risk: ${record.draft?.risk ?? "(none)"}`,
+    `duplicate: ${record.draft?.duplicateCheck.similarExistingRule ?? "none found"}`,
+    `searched paths: ${record.draft?.duplicateCheck.searched.join(", ") || "(none)"}`,
     "",
     "issue:",
     record.issue.description,
@@ -220,18 +232,31 @@ function renderFullDraft(record: LearningRecord): string {
     "rationale:",
     record.draft?.rationale || "(none)",
     "",
-    `approve: /learn approve ${record.id}`,
+    `approve: /learn approve ${record.id} --confirm`,
     `reject: /learn reject ${record.id} <reason>`,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function formatDraftLabel(record: LearningRecord): string {
   const rule = record.draft?.proposedText || "(no draft yet)";
-  return `${record.id} · ${record.classification} · ${bounded(rule, 180).replace(/\s+/g, " ")} · ${bounded(record.issue.description, 120).replace(/\s+/g, " ")}`;
+  return `${record.id} · ${classificationLabel(record.classification)} · ${bounded(rule, 180).replace(/\s+/g, " ")} · ${bounded(record.issue.description, 120).replace(/\s+/g, " ")}`;
+}
+
+function classificationLabel(classification: LearningClassification): string {
+  return ({
+    verification_overclaim: "Verification overclaim",
+    scope_drift: "Scope drift",
+    unsafe_edit: "Unsafe edit",
+    wrong_tool: "Wrong tool",
+    context_miss: "Context miss",
+    stale_data: "Stale data",
+    transient: "Transient / note only",
+    other: "Other",
+  } as Record<LearningClassification, string>)[classification] ?? classification;
 }
 
 export async function runDraftReview(root: string, ctx: ExtensionCommandContext): Promise<{ ok: true; message: string; record: LearningRecord } | { ok: false; message: string }> {
-  if (!ctx.hasUI) return { ok: false, message: "UI draft review unavailable in this mode. Use: /learn pending, /learn show <id>, /learn approve <id>, or /learn reject <id>." };
+  if (!ctx.hasUI) return { ok: false, message: "UI draft review unavailable in this mode. No learning was lost. Use: /learn pending, /learn show <id>, /learn approve <id> --confirm, or /learn reject <id>." };
   const pending = listLearnings(root);
   const drafts = pending.filter((record) => record.draft);
   if (pending.length === 0) return { ok: false, message: "No pending learnings. Use /learn pick or /learn note <issue> first." };
@@ -243,19 +268,21 @@ export async function runDraftReview(root: string, ctx: ExtensionCommandContext)
   const record = drafts[labels.indexOf(pickedLabel)];
   if (!record) return { ok: false, message: "Cancelled. Selected draft was not found." };
 
-  await ctx.ui.editor("Review learning draft (full text)", renderFullDraft(record));
-  const applyLabel = "Apply rule to AGENTS.md";
+  await ctx.ui.editor("Read-only preview: learning draft", renderFullDraft(record));
+  const resolvedTarget = resolveRepoAgentsPath(root, record);
+  const targetPath = resolvedTarget.ok ? resolvedTarget.relPath : record.recommendedTarget.path;
+  const applyLabel = `Apply rule to ${targetPath}`;
   const backLabel = "Keep pending / Back";
   const rejectLabel = "Reject draft";
   const action = await ctx.ui.select("Apply or reject this draft", [backLabel, applyLabel, rejectLabel]);
   if (action === applyLabel) {
-    const target = `${record.recommendedTarget.kind}:${record.recommendedTarget.path}`;
+    const target = `${record.recommendedTarget.kind}:${targetPath}`;
     const rule = record.draft?.proposedText ?? "(none)";
-    const consequence = `Target: ${target}\nRule to append: ${rule}`;
+    const consequence = `Will edit: ${targetPath}\nSection: ## Agent Learnings\nChange: append single bullet if not already present\nTarget: ${target}\nRule to append: ${rule}`;
     const ui = ctx.ui as typeof ctx.ui & { confirm?: (title: string, message: string) => Promise<boolean> };
     const confirmed = ui.confirm
-      ? await ui.confirm("Confirm applying rule to AGENTS.md", consequence)
-      : (await ctx.ui.select(`Confirm applying rule to AGENTS.md\n\n${consequence}`, [backLabel, applyLabel])) === applyLabel;
+      ? await ui.confirm(`Confirm applying rule to ${targetPath}`, consequence)
+      : (await ctx.ui.select(`Confirm applying rule to ${targetPath}\n\n${consequence}`, [backLabel, applyLabel])) === applyLabel;
     if (!confirmed) return { ok: false, message: "Cancelled. Draft left pending." };
     const result = applyRepoAgentsRule(root, record);
     if (result.applied) {
@@ -265,7 +292,7 @@ export async function runDraftReview(root: string, ctx: ExtensionCommandContext)
     return { ok: true, record, message: result.message };
   }
   if (action === rejectLabel) {
-    const reasons = ["Duplicate / already covered", "Too specific / not durable", "Wrong target", "Bad draft wording", "Not actually a mistake", "Other..."];
+    const reasons = ["Duplicate / already covered", "Too specific / not durable", "Wrong target", "Bad draft wording", "Keep as note only / do not apply rule", "Not actually a mistake", "Other..."];
     const structuredReason = await ctx.ui.select("Reject reason", reasons);
     if (!structuredReason) return { ok: false, message: "Cancelled. Draft left pending." };
     const detail = (await ctx.ui.input("Optional rejection detail", "Optional detail"))?.trim();
@@ -278,7 +305,7 @@ export async function runDraftReview(root: string, ctx: ExtensionCommandContext)
 
 export async function runInteractiveLearn(root: string, ctx: ExtensionCommandContext): Promise<{ ok: true; record: LearningRecord; message: string } | { ok: false; message: string }> {
   if (!ctx.hasUI) {
-    return { ok: false, message: "UI picker unavailable in this mode. Use: /learn note <what went wrong>" };
+    return { ok: false, message: "UI picker unavailable in this mode. No learning was created. Use: /learn note <what went wrong>" };
   }
 
   const turns = recentPickableTurns(ctx);
@@ -294,7 +321,7 @@ export async function runInteractiveLearn(root: string, ctx: ExtensionCommandCon
     const candidate = turns[labels.indexOf(pickedLabel)];
     if (!candidate) return { ok: false, message: "Cancelled. Selected turn was not found." };
 
-    await ctx.ui.editor("Selected turn preview", renderTurnPreview(candidate));
+    await ctx.ui.editor("Read-only preview: selected turn", renderTurnPreview(candidate));
     const action = await ctx.ui.select("Use this turn?", ["Use this turn", "Back to picker", "Cancel"]);
     if (action === "Use this turn") picked = candidate;
     else if (action === "Back to picker") continue;

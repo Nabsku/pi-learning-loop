@@ -52,13 +52,13 @@ await commands.learn.handler("note tests passed claim used no command", { cwd: r
 const noteMessage = messages.at(-1)?.content ?? "";
 const id = /learn_[A-Za-z0-9_Z]+_[a-f0-9]{6}/.exec(noteMessage)?.[0];
 assert(id, "created message should include id");
-assert(noteMessage.includes("drafted:"), "note should immediately draft the captured learning");
-assert(noteMessage.includes("Review with: /learn review"), "note should send the user to the review queue");
+assert(noteMessage.includes("pending learning created:"), "note should immediately draft the captured learning");
+assert(noteMessage.includes("Next: /learn review"), "note should send the user to the review queue");
 assert(existsSync(join(root, ".pi/custom-learnings/pending", `${id}.json`)), "custom learningsDir should be used");
 const noteRecord = JSON.parse(readFileSync(join(root, ".pi/custom-learnings/pending", `${id}.json`), "utf8"));
 assert(noteRecord.draft?.proposedText, "note should persist an immediate draft");
 
-await commands.learn.handler(`approve ${id}`, { cwd: root });
+await commands.learn.handler(`approve ${id} --confirm`, { cwd: root });
 const docsAgents = readFileSync(join(root, "docs/AGENTS.md"), "utf8");
 assert(docsAgents.includes("## Agent Learnings"), "custom repoAgentsPath should receive approved rule");
 assert(!existsSync(join(root, "AGENTS.md")), "default AGENTS.md should not be created when repoAgentsPath is configured");

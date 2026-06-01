@@ -58,11 +58,12 @@ const ctx = {
       uiCalls.push(`select:${title}:${options.join("|")}`);
       if (selectCount === 1) {
         assert(title === "Select the turn to learn from", "picker title should use the new concise copy");
-        const assistantOption = options.find((option) => option.includes("assistant") && option.includes("All tests pass"));
-        assert(assistantOption, "picker should include assistant turn excerpts");
-        assert(/^\[(likely|recent|last)\] (assistant|tool|user) · /.test(assistantOption) && assistantOption.split(" · ").length >= 3, `picker label should use stable category/role/reason/excerpt columns: ${assistantOption}`);
-        assert(!assistantOption.includes("after tool failure"), "picker label should avoid dense prose reasons");
-        return assistantOption;
+        assert(options[0] === "[last] last assistant response", `last assistant shortcut should be first: ${options.join("|")}`);
+        assert(!options.some((option) => option.includes("All tests pass") || option.includes("pnpm test failed")), "picker labels should not include excerpts or evidence");
+        assert(!options.some((option) => option.startsWith("[likely]") && option.includes("All tests pass")), "last assistant should be deduped from ranked options");
+        assert(options.some((option) => option.startsWith("[likely] failed tool output · tool · #")), `picker should include simple likely label with stable disambiguator: ${options.join("|")}`);
+        assert(options.some((option) => /^\[recent\] (assistant|tool|user) response · \d+ turns? ago · #/.test(option)), `picker should include simple recent labels: ${options.join("|")}`);
+        return options[0];
       }
       assert(title === "Use this turn?", "preview confirmation should be asked after full preview");
       assert(options.join("|") === "Use this turn|Back to picker|Cancel", "preview confirmation should offer use/back/cancel");
@@ -76,7 +77,7 @@ const ctx = {
     },
     async editor(title: string, prefill?: string) {
       uiCalls.push(`editor:${title}:${prefill ?? ""}`);
-      if (title === "Selected turn preview") {
+      if (title === "Read-only preview: selected turn") {
         sawPreview = true;
         assert(prefill?.includes("selected excerpt:"), "preview should include selected excerpt heading");
         assert(prefill?.includes("All tests pass now."), "preview should include selected excerpt text");
