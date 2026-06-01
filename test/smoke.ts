@@ -42,6 +42,7 @@ assert(existsSync(join(root, ".pi/learnings/applied", `${id}.json`)), "applied r
 
 const listTool = tools.find((tool) => tool.name === "learning_list");
 assert(listTool, "learning_list tool should register");
+assert(!tools.some((tool) => tool.name === "learning_apply_rule"), "learning_apply_rule tool must not register; applying requires slash-command confirmation");
 const result = await listTool.execute("list", { cwd: root }) as { content: Array<{ text: string }> };
 assert(result.content[0]?.text.includes("No pending learnings"), "list tool should report no pending learnings");
 

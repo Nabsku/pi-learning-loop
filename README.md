@@ -53,6 +53,26 @@ Fields:
 
 Unsafe repo paths that escape the repo are ignored and fall back to defaults. Global Pi paths are only accepted when they resolve to the configured `~/.pi/agent/...` files.
 
+## Files touched
+
+- Creates `.pi/learnings.json` during plugin resource discovery if no config exists.
+- Reads legacy `.pi/learning-loop.json` if the new config is absent.
+- Creates learning records under `.pi/learnings/` by default.
+- Writes approved repo-local rules to the configured repo agents file, default `AGENTS.md`.
+- Writes global Pi files only through explicit global approval.
+
+## Tool surface
+
+Registered tools are capture/draft/list only:
+
+```text
+learning_mark_issue
+learning_draft_rule
+learning_list
+```
+
+There is intentionally no apply/write tool. Applying a rule requires the TUI review flow or slash-command confirmation.
+
 ## Safety model
 
 - No silent writes to the configured repo agents file; direct CLI approval requires `--confirm`.

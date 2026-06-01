@@ -1,8 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { applyRepoAgentsRule } from "./apply.ts";
 import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.ts";
-import { bounded, createLearning, listLearnings, moveLearning, readLearning, repoRoot, saveLearning } from "./store.ts";
+import { bounded, createLearning, listLearnings, readLearning, repoRoot, saveLearning } from "./store.ts";
 import { textResult } from "./result.ts";
 import { loadConfig } from "./config.ts";
 
@@ -46,25 +45,6 @@ export function registerLearningTools(pi: ExtensionAPI) {
       record.draft = await draftLearning(root, record, ctx);
       saveLearning(root, record);
       return textResult(summarize(record), record);
-    },
-  });
-
-  pi.registerTool({
-    name: "learning_apply_rule",
-    label: "Learning Apply Rule",
-    description: "Apply an approved repo-local learning draft to AGENTS.md.",
-    promptSnippet: "Only use after explicit user approval for the exact learning id.",
-    parameters: Type.Object({ cwd: Type.Optional(Type.String()), id: Type.String(), approved: Type.Boolean() }),
-    async execute(_id, params) {
-      if (params.approved !== true) return textResult("Blocked: approved=true is required.", { applied: false });
-      const root = repoRoot(params.cwd);
-      const record = readLearning(root, params.id);
-      const result = applyRepoAgentsRule(root, record);
-      if (result.applied) {
-        record.appliedAt = new Date().toISOString();
-        moveLearning(root, record, "applied");
-      }
-      return textResult(result.message, result);
     },
   });
 
