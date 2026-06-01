@@ -21,19 +21,19 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-config-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-config-"));
 
-const configPath = join(root, ".pi/learning-loop.json");
+const configPath = join(root, ".pi/learnings.json");
 assert(!commands.learn.description?.includes("init-config"), "help description should not advertise init-config");
 assert(!commands.learn.getArgumentCompletions?.("init").some((item) => item.value === "init-config"), "completions should not include init-config");
 assert(commands.learn.getArgumentCompletions?.("note test") === null, "completions should not replace note arguments");
 await handlers.resources_discover?.[0]?.({ cwd: root, reason: "startup" }, { cwd: root });
-assert(existsSync(configPath), "loading the plugin should create .pi/learning-loop.json");
+assert(existsSync(configPath), "loading the plugin should create .pi/learnings.json");
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 assert(config.learningsDir === ".pi/learnings", "default config should set learningsDir");
 assert(config.repoAgentsPath === "AGENTS.md", "default config should set repoAgentsPath");
-assert(config.modelOverrides.draftRule.model === "openai-codex/gpt-5.5", "default config should set draftRule model override");
-assert(config.modelOverrides.classifyIssue.model === "openai-codex/gpt-5.4-mini", "default config should set classifyIssue model override");
+assert(!config.modelOverrides?.draftRule?.model, "default config should not set draftRule model override");
+assert(!config.modelOverrides?.classifyIssue?.model, "default config should not set classifyIssue model override");
 
 writeFileSync(configPath, JSON.stringify({
   version: 1,
@@ -56,6 +56,16 @@ assert(noteMessage.includes("captured:"), "note should report the captured learn
 assert(noteMessage.includes("no repo rule applied"), "note should be explicit that no repo rule was applied");
 assert(noteMessage.includes("next: /learn"), "note should send the user to the review queue");
 assert(existsSync(join(root, ".pi/custom-learnings/pending", `${id}.json`)), "custom learningsDir should be used");
+const legacyRoot = mkdtempSync(join(tmpdir(), "pi-learnings-legacy-config-"));
+mkdirSync(join(legacyRoot, ".pi"), { recursive: true });
+writeFileSync(join(legacyRoot, ".pi/learning-loop.json"), JSON.stringify({ version: 1, learningsDir: ".pi/legacy-learnings", modelOverrides: {} }, null, 2), "utf8");
+await handlers.resources_discover?.[0]?.({ cwd: legacyRoot, reason: "startup" }, { cwd: legacyRoot });
+assert(!existsSync(join(legacyRoot, ".pi/learnings.json")), "legacy config should not be overwritten by automatic init");
+await commands.learn.handler("note legacy config stays readable", { cwd: legacyRoot });
+const legacyMessage = messages.at(-1)?.content ?? "";
+const legacyId = /learn_[A-Za-z0-9_Z]+_[a-f0-9]{6}/.exec(legacyMessage)?.[0];
+assert(legacyId, "legacy config note should include id");
+assert(existsSync(join(legacyRoot, ".pi/legacy-learnings/pending", `${legacyId}.json`)), "legacy config path should still be read");
 const noteRecord = JSON.parse(readFileSync(join(root, ".pi/custom-learnings/pending", `${id}.json`), "utf8"));
 assert(noteRecord.draft?.proposedText, "note should persist an immediate draft");
 

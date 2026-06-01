@@ -19,7 +19,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-ui-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-ui-"));
 writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
 
 const uiCalls: string[] = [];

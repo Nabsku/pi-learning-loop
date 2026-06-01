@@ -1,7 +1,7 @@
 {
-  "name": "pi-learning-loop",
+  "name": "pi-learnings",
   "version": "0.1.0",
-  "description": "Approval-gated learning loop for Pi: turn concrete mistakes into durable agent rules.",
+  "description": "Approval-gated learning capture for Pi: turn concrete mistakes into durable agent rules.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --allowImportingTsExtensions --skipLibCheck index.ts test/smoke.ts test/interactive.ts test/config.ts test/model-classify.ts test/model-draft.ts test/review-picker.ts test/safety.ts test/ux-polish.ts test/learn-main-menu.ts test/global-target.ts test/picker-label-unique.ts test/picker-quality.ts test/picker-specific-tool.ts test/picker-semantic-match.ts",

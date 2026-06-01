@@ -1,6 +1,6 @@
-# pi-learning-loop
+# pi-learnings
 
-Approval-gated learning loop for Pi.
+Approval-gated learning capture for Pi.
 
 `/learn` turns a concrete Pi mistake into a proposed durable rule. It drafts first, shows the target and proposed text, and only writes after explicit approval.
 
@@ -28,7 +28,7 @@ Advanced fallback commands remain available for scripts or broken/non-interactiv
 
 ## Config
 
-Config is created automatically when the plugin loads. It writes `.pi/learning-loop.json`:
+Config is created automatically when the plugin loads. It writes `.pi/learnings.json` and still reads legacy `.pi/learning-loop.json` if present:
 
 ```json
 {
@@ -38,16 +38,7 @@ Config is created automatically when the plugin loads. It writes `.pi/learning-l
   "globalAgentsPath": "~/.pi/agent/AGENTS.md",
   "globalSystemPath": "~/.pi/agent/APPEND_SYSTEM.md",
   "maxExcerptChars": 4000,
-  "modelOverrides": {
-    "draftRule": {
-      "model": "openai-codex/gpt-5.5",
-      "thinkingLevel": "medium"
-    },
-    "classifyIssue": {
-      "model": "openai-codex/gpt-5.4-mini",
-      "thinkingLevel": "minimal"
-    }
-  }
+  "modelOverrides": {}
 }
 ```
 
@@ -58,7 +49,7 @@ Fields:
 - `globalAgentsPath`: exact global Pi `AGENTS.md` path allowed for explicit global-rule approval.
 - `globalSystemPath`: exact global Pi `APPEND_SYSTEM.md` path allowed for explicit global-system approval.
 - `maxExcerptChars`: maximum stored source excerpt length.
-- `modelOverrides`: per-operation model preferences for model-backed learning steps. `classifyIssue` is used when creating records from `/learn note`, `/learn pick`, or `learning_mark_issue`; `draftRule` is used by `/learn draft`, `/learn pick`, and `learning_draft_rule`. If the configured model cannot be resolved/authenticated or returns invalid JSON, the plugin falls back to deterministic local heuristics.
+- `modelOverrides`: optional per-operation model preferences for model-backed learning steps. Leave it empty to use the user's normal Pi/default model path. If an explicit override is configured, `classifyIssue` is used when creating records from `/learn note`, `/learn pick`, or `learning_mark_issue`; `draftRule` is used by `/learn draft`, `/learn pick`, and `learning_draft_rule`. If the configured model cannot be resolved/authenticated or returns invalid JSON, the plugin falls back to deterministic local heuristics.
 
 Unsafe repo paths that escape the repo are ignored and fall back to defaults. Global Pi paths are only accepted when they resolve to the configured `~/.pi/agent/...` files.
 

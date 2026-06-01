@@ -26,19 +26,14 @@ export const DEFAULT_CONFIG: LearningLoopConfig = {
   globalAgentsPath: "~/.pi/agent/AGENTS.md",
   globalSystemPath: "~/.pi/agent/APPEND_SYSTEM.md",
   maxExcerptChars: 4000,
-  modelOverrides: {
-    draftRule: {
-      model: "openai-codex/gpt-5.5",
-      thinkingLevel: "medium",
-    },
-    classifyIssue: {
-      model: "openai-codex/gpt-5.4-mini",
-      thinkingLevel: "minimal",
-    },
-  },
+  modelOverrides: {},
 };
 
 export function configPath(root: string): string {
+  return resolve(root, ".pi", "learnings.json");
+}
+
+export function legacyConfigPath(root: string): string {
   return resolve(root, ".pi", "learning-loop.json");
 }
 
@@ -62,8 +57,8 @@ function modelOverride(value: unknown, fallback?: ModelOverride): ModelOverride 
 function modelOverrides(value: unknown): LearningLoopConfig["modelOverrides"] {
   const raw = value && typeof value === "object" ? value as Partial<LearningLoopConfig["modelOverrides"]> : {};
   return {
-    draftRule: modelOverride(raw.draftRule, DEFAULT_CONFIG.modelOverrides.draftRule),
-    classifyIssue: modelOverride(raw.classifyIssue, DEFAULT_CONFIG.modelOverrides.classifyIssue),
+    draftRule: modelOverride(raw.draftRule),
+    classifyIssue: modelOverride(raw.classifyIssue),
   };
 }
 
@@ -87,8 +82,10 @@ function safeGlobalPiPath(value: unknown, fallback: string): string {
 
 export function loadConfig(root: string): LearningLoopConfig {
   const path = configPath(root);
-  if (!existsSync(path)) return { ...DEFAULT_CONFIG };
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<LearningLoopConfig>;
+  const legacyPath = legacyConfigPath(root);
+  const readPath = existsSync(path) ? path : legacyPath;
+  if (!existsSync(readPath)) return { ...DEFAULT_CONFIG };
+  const parsed = JSON.parse(readFileSync(readPath, "utf8")) as Partial<LearningLoopConfig>;
   return {
     version: 1,
     learningsDir: safeRepoRelative(root, parsed.learningsDir, DEFAULT_CONFIG.learningsDir),

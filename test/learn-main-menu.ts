@@ -38,7 +38,7 @@ const { commands, messages } = install();
 
 // Bare /learn in no-UI mode is concise help, not the old full usage dump.
 {
-  const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-menu-no-ui-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-learnings-menu-no-ui-"));
   writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
   await commands.learn.handler("", { cwd: root, hasUI: false });
   const content = messages.at(-1)?.content ?? "";
@@ -49,7 +49,7 @@ const { commands, messages } = install();
 
 // Bare /learn opens a main menu and Capture delegates to the existing picker flow.
 {
-  const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-menu-capture-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-learnings-menu-capture-"));
   writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
   const seen: string[] = [];
   const ctx = {
@@ -62,7 +62,7 @@ const { commands, messages } = install();
     ui: {
       async select(title: string, options: string[]) {
         seen.push(`select:${title}:${options.join("|")}`);
-        if (title === "Learning loop") {
+        if (title === "Pi learnings") {
           assert(options.join("|") === "Capture from recent turn|Review pending drafts|Browse learnings|Quick note", "main menu should expose required actions");
           return "Capture from recent turn";
         }
@@ -75,13 +75,13 @@ const { commands, messages } = install();
     },
   };
   await commands.learn.handler("", ctx);
-  assert(seen[0]?.startsWith("select:Learning loop:"), "bare UI learn should start at main menu");
+  assert(seen[0]?.startsWith("select:Pi learnings:"), "bare UI learn should start at main menu");
   assert((messages.at(-1)?.content ?? "").includes("created:"), "capture action should create through existing picker flow");
 }
 
 // Review action delegates to existing draft review.
 {
-  const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-menu-review-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-learnings-menu-review-"));
   writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
   const record = seedRecord(root, "Claimed tests passed without running them.");
   const titles: string[] = [];
@@ -91,7 +91,7 @@ const { commands, messages } = install();
     ui: {
       async select(title: string, options: string[]) {
         titles.push(title);
-        if (title === "Learning loop") return "Review pending drafts";
+        if (title === "Pi learnings") return "Review pending drafts";
         if (title === "Select draft to review") return options[0];
         if (title === "Apply or reject this draft") return "Keep pending / Back";
         throw new Error(`unexpected select: ${title}`);
@@ -105,7 +105,7 @@ const { commands, messages } = install();
 
 // Browse action lists statuses and lets users inspect without typing an id.
 {
-  const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-menu-browse-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-learnings-menu-browse-"));
   writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
   const pending = seedRecord(root, "Pending issue");
   const applied = moveLearning(root, seedRecord(root, "Applied issue"), "applied");
@@ -116,7 +116,7 @@ const { commands, messages } = install();
     hasUI: true,
     ui: {
       async select(title: string, options: string[]) {
-        if (title === "Learning loop") return "Browse learnings";
+        if (title === "Pi learnings") return "Browse learnings";
         if (title === "Browse learnings") {
           assert(options.some((o) => o.includes("pending") && o.includes(pending.id)), "browse should include pending records");
           assert(options.some((o) => o.includes("applied") && o.includes(applied.id)), "browse should include applied records");
@@ -133,13 +133,13 @@ const { commands, messages } = install();
 
 // Quick note prompts for issue and creates a drafted pending learning.
 {
-  const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-menu-note-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-learnings-menu-note-"));
   writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
   await commands.learn.handler("", {
     cwd: root,
     hasUI: true,
     ui: {
-      async select(title: string) { assert(title === "Learning loop", "quick note should start from main menu"); return "Quick note"; },
+      async select(title: string) { assert(title === "Pi learnings", "quick note should start from main menu"); return "Quick note"; },
       async input(title: string) { assert(title === "What went wrong?", "quick note should prompt for issue"); return "Used the wrong package manager command."; },
     },
   });

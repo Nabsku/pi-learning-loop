@@ -24,7 +24,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-ux-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-ux-"));
 writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
 
 assert(commands.learn.description?.includes("/learn\n/learn note <issue>"), "primary command description should only promote /learn and /learn note <issue>");

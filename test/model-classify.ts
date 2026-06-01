@@ -6,9 +6,9 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { classifyIssueWithModel } from "../src/draft.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pll-model-classify-"));
-writeFileSync(join(root, ".pi-learning-loop-test-root"), "");
+writeFileSync(join(root, ".pi-learnings-test-root"), "");
 mkdirSync(join(root, ".pi"), { recursive: true });
-writeFileSync(join(root, ".pi/learning-loop.json"), JSON.stringify({
+writeFileSync(join(root, ".pi/learnings.json"), JSON.stringify({
   version: 1,
   modelOverrides: {
     classifyIssue: { model: "fake-provider/fake-classifier", thinkingLevel: "minimal" },
@@ -48,4 +48,39 @@ const classification = await classifyIssueWithModel(root, "Assistant used npm in
 });
 
 assert.equal(classification, "wrong_tool");
+
+const defaultRoot = mkdtempSync(join(tmpdir(), "pll-model-classify-default-"));
+mkdirSync(join(defaultRoot, ".pi"), { recursive: true });
+writeFileSync(join(defaultRoot, ".pi/learnings.json"), JSON.stringify({ version: 1, modelOverrides: {} }, null, 2));
+const defaultModel = { provider: "user-provider", id: "user-default", api: "fake-api" };
+const defaultCtx = {
+  model: defaultModel,
+  modelRegistry: {
+    find() {
+      throw new Error("default model path should not resolve a hardcoded override");
+    },
+    async getApiKeyAndHeaders(model: unknown) {
+      assert.equal(model, defaultModel);
+      return { ok: true, apiKey: "default-key", headers: { "x-default": "yes" } };
+    },
+  },
+} as unknown as ExtensionContext;
+const defaultClassification = await classifyIssueWithModel(defaultRoot, "Assistant made a weird mistake", defaultCtx, {
+  complete: async (model, _context, options) => {
+    assert.equal(model, defaultModel);
+    assert.deepEqual(options, { reasoning: undefined, apiKey: "default-key", headers: { "x-default": "yes" } });
+    return {
+      role: "assistant",
+      api: "fake-api",
+      provider: "user-provider",
+      model: "user-default",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: JSON.stringify({ classification: "stale_data" }) }],
+    };
+  },
+});
+assert.equal(defaultClassification, "stale_data");
+
 console.log("model-classify ok");

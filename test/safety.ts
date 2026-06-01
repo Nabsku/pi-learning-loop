@@ -18,10 +18,10 @@ learningLoop({
   sendMessage(message: { content: string; details?: unknown }) { messages.push(message); },
 } as never);
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-safety-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-safety-"));
 mkdirSync(join(root, ".pi"), { recursive: true });
 mkdirSync(join(root, "docs"), { recursive: true });
-writeFileSync(join(root, ".pi", "learning-loop.json"), JSON.stringify({ version: 1, repoAgentsPath: "docs/TEAM_RULES.md" }), "utf8");
+writeFileSync(join(root, ".pi", "learnings.json"), JSON.stringify({ version: 1, repoAgentsPath: "docs/TEAM_RULES.md" }), "utf8");
 writeFileSync(join(root, "AGENTS.md"), "# Wrong target\n", "utf8");
 writeFileSync(join(root, "docs/TEAM_RULES.md"), "# Team Rules\n", "utf8");
 
@@ -54,7 +54,7 @@ assert(confirmed.includes("docs/TEAM_RULES.md"), "confirmed approve should repor
 assert(readFileSync(join(root, "docs/TEAM_RULES.md"), "utf8").includes("Do not claim a check passed"), "confirmed approve should write configured repoAgentsPath");
 assert(!readFileSync(join(root, "AGENTS.md"), "utf8").includes("Do not claim a check passed"), "confirmed approve must not write hardcoded AGENTS.md when repoAgentsPath differs");
 
-const pickRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-safety-pick-"));
+const pickRoot = mkdtempSync(join(tmpdir(), "pi-learnings-safety-pick-"));
 writeFileSync(join(pickRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");
 await commands.learn.handler("pick", {
   cwd: pickRoot,
@@ -72,9 +72,9 @@ assert(pickMessage.includes("no repo rule applied yet"), "pick success should ex
 assert(pickMessage.includes("/learn review"), "pick success should point to /learn review");
 assert(pickMessage.includes("AGENTS.md"), "pick success should include target if approved");
 
-const maliciousRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-malicious-"));
+const maliciousRoot = mkdtempSync(join(tmpdir(), "pi-learnings-malicious-"));
 writeFileSync(join(maliciousRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");
-const outside = join(tmpdir(), `pi-learning-loop-outside-${process.pid}.md`);
+const outside = join(tmpdir(), `pi-learnings-outside-${process.pid}.md`);
 writeFileSync(outside, "outside\n", "utf8");
 const malicious = createLearning(maliciousRoot, {
   source: { selector: "manual", role: "unknown", excerpt: "bad persisted path" },

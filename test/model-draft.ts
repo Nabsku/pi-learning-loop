@@ -7,9 +7,9 @@ import { createLearning } from "../src/store.ts";
 import { draftLearning } from "../src/draft.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pll-model-draft-"));
-writeFileSync(join(root, ".pi-learning-loop-test-root"), "");
+writeFileSync(join(root, ".pi-learnings-test-root"), "");
 mkdirSync(join(root, ".pi"), { recursive: true });
-writeFileSync(join(root, ".pi/learning-loop.json"), JSON.stringify({
+writeFileSync(join(root, ".pi/learnings.json"), JSON.stringify({
   version: 1,
   modelOverrides: {
     draftRule: { model: "fake-provider/fake-model", thinkingLevel: "high" },
@@ -62,4 +62,46 @@ assert.match(JSON.stringify(calls[0]?.context), /Claimed tests passed/);
 assert.equal(record.draft.proposedText, "- Only report tests as passed after running the exact test command and seeing a successful exit.");
 assert.equal(record.draft.rationale, "Uses the reported failed test evidence.");
 assert.equal(record.draft.risk, "low");
+
+const defaultRoot = mkdtempSync(join(tmpdir(), "pll-model-draft-default-"));
+mkdirSync(join(defaultRoot, ".pi"), { recursive: true });
+writeFileSync(join(defaultRoot, ".pi/learnings.json"), JSON.stringify({ version: 1, modelOverrides: {} }, null, 2));
+const defaultModel = { provider: "user-provider", id: "user-default", api: "fake-api" };
+const defaultCtx = {
+  model: defaultModel,
+  modelRegistry: {
+    find() {
+      throw new Error("default model path should not resolve a hardcoded override");
+    },
+    async getApiKeyAndHeaders(model: unknown) {
+      assert.equal(model, defaultModel);
+      return { ok: true, apiKey: "default-key", headers: undefined };
+    },
+  },
+} as unknown as ExtensionContext;
+const defaultRecord = createLearning(defaultRoot, {
+  source: { selector: "manual", role: "unknown", excerpt: "Assistant drifted scope." },
+  issue: { description: "Assistant made unrelated refactors." },
+  classification: "scope_drift",
+  recommendedTarget: { kind: "repo-agents", path: "AGENTS.md" },
+});
+const defaultDraft = await draftLearning(defaultRoot, defaultRecord, defaultCtx, {
+  complete: async (model, _context, options) => {
+    assert.equal(model, defaultModel);
+    assert.deepEqual(options, { reasoning: undefined, apiKey: "default-key", headers: undefined });
+    return {
+      role: "assistant",
+      api: "fake-api",
+      provider: "user-provider",
+      model: "user-default",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: JSON.stringify({ proposedText: "- Keep changes scoped to the user's requested task.", rationale: "Uses the user's default model.", risk: "low" }) }],
+    };
+  },
+});
+assert.equal(defaultDraft.proposedText, "- Keep changes scoped to the user's requested task.");
+assert.equal(defaultDraft.rationale, "Uses the user's default model.");
+
 console.log("model-draft ok");

@@ -78,7 +78,7 @@ function renderRecord(record: ReturnType<typeof readLearning>): string {
 
 export function registerLearningCommand(pi: ExtensionAPI) {
   pi.registerCommand("learn", {
-    description: "Learning loop:\n/learn\n/learn note <issue>",
+    description: "Pi learnings:\n/learn\n/learn note <issue>",
     getArgumentCompletions(prefix: string, ctx?: { cwd?: unknown }) {
       const trimmedStart = prefix.trimStart();
       const parts = trimmedStart.split(/\s+/);
@@ -102,7 +102,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
       const [subRaw, ...rest] = args.trim().split(/\s/).filter(Boolean);
       const sub = subRaw ?? "menu";
       const root = repoRoot(ctx.cwd);
-      const send = (content: string, details?: unknown) => pi.sendMessage({ customType: "learning-loop", display: true, content, details });
+      const send = (content: string, details?: unknown) => pi.sendMessage({ customType: "pi-learnings", display: true, content, details });
 
       if (sub === "menu") {
         const result = await runLearningMainMenu(root, ctx);

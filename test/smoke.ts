@@ -21,7 +21,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-"));
 writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n\n## Verification\n\n", "utf8");
 
 await commands.learn.handler("note Pi claimed tests passed without running the command", { cwd: root });

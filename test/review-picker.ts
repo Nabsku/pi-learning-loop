@@ -22,7 +22,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-review-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-review-"));
 writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
 const longIssue = `claimed tests passed without running them ${"with lots of surrounding context ".repeat(20)}`;
 
@@ -81,7 +81,7 @@ assert(existsSync(join(root, ".pi/learnings/applied", `${id}.json`)), "review-ap
 assert(uiCalls.some((call) => call.startsWith("select:Select draft")), "draft picker should be used");
 assert(uiCalls.some((call) => call.startsWith("editor:Read-only preview: learning draft")), "full overflow review should be used");
 
-const followUpRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-note-follow-up-"));
+const followUpRoot = mkdtempSync(join(tmpdir(), "pi-learnings-note-follow-up-"));
 writeFileSync(join(followUpRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");
 let followUpId = "";
 const followUpSelects: string[] = [];
@@ -112,7 +112,7 @@ assert(messages.at(-1)?.content.includes("Draft left pending"), "backing out of 
 assert(existsSync(join(followUpRoot, ".pi/learnings/pending", `${followUpId}.json`)), "review-now back action should leave the note pending");
 assert(followUpSelects.some((call) => call.startsWith("Review this learning draft now?")), "note should show a follow-up choice when UI is available");
 
-const keepRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-note-keep-"));
+const keepRoot = mkdtempSync(join(tmpdir(), "pi-learnings-note-keep-"));
 writeFileSync(join(keepRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");
 await commands.learn.handler("note keep this draft pending", {
   cwd: keepRoot,
@@ -124,7 +124,7 @@ assert(keepMessage.includes("captured:"), "Keep pending should send the concise 
 assert(keepMessage.includes("no repo rule applied"), "Keep pending should say no repo rule was applied");
 assert(keepMessage.includes("next: /learn"), "Keep pending should point to review");
 
-const rejectRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-review-reject-"));
+const rejectRoot = mkdtempSync(join(tmpdir(), "pi-learnings-review-reject-"));
 writeFileSync(join(rejectRoot, "AGENTS.md"), "# Repo Rules\n", "utf8");
 await commands.learn.handler("note one-off typo in a temporary scratch file", { cwd: rejectRoot });
 const rejectId = /learn_[A-Za-z0-9_Z]+_[a-f0-9]{6}/.exec(messages.at(-1)?.content ?? "")?.[0];
@@ -161,7 +161,7 @@ await commands.learn.handler("review", { ...rejectCtx, send: (content: string) =
 const rejected = JSON.parse(readFileSync(join(rejectRoot, ".pi/learnings/rejected", `${rejectId}.json`), "utf8"));
 assert(rejected.rejectionReason === "Too specific / not durable — only applied to today's scratch file", "structured rejection reason and detail should be combined");
 
-const emptyRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-review-empty-"));
+const emptyRoot = mkdtempSync(join(tmpdir(), "pi-learnings-review-empty-"));
 await commands.learn.handler("review", { cwd: emptyRoot, hasUI: true, ui: rejectCtx.ui } as never);
 assert(messages.at(-1)?.content.includes("No pending learnings"), "empty state should distinguish no pending learnings");
 createLearning(emptyRoot, {

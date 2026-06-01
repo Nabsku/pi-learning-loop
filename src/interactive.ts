@@ -360,7 +360,7 @@ export async function runLearningMainMenu(root: string, ctx: ExtensionCommandCon
   const review = "Review pending drafts";
   const browse = "Browse learnings";
   const note = "Quick note";
-  const action = await ctx.ui.select("Learning loop", [capture, review, browse, note]);
+  const action = await ctx.ui.select("Pi learnings", [capture, review, browse, note]);
   if (action === capture) return runInteractiveLearn(root, ctx);
   if (action === review) return runDraftReview(root, ctx);
   if (action === browse) return runBrowseLearnings(root, ctx);

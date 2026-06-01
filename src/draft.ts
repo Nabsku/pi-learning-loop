@@ -19,6 +19,20 @@ const TRANSIENT = /network timeout|rate limit|429|temporary|flaky|one-off|permis
 type DraftCompletion = (model: Model<any>, context: Context, options?: SimpleStreamOptions) => Promise<AssistantMessage>;
 export type DraftLearningDeps = { complete?: DraftCompletion };
 
+type SelectedModel = {
+  model: Model<any>;
+  thinkingLevel?: ModelOverride["thinkingLevel"];
+};
+
+function selectModel(ctx: ExtensionContext, override?: ModelOverride): SelectedModel | undefined {
+  const modelRef = parseModelRef(override?.model);
+  if (modelRef) {
+    const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
+    return model ? { model, thinkingLevel: override?.thinkingLevel } : undefined;
+  }
+  return ctx.model ? { model: ctx.model, thinkingLevel: override?.thinkingLevel } : undefined;
+}
+
 export function classifyIssue(description: string): LearningClassification {
   if (TRANSIENT.test(description)) return "transient";
   return CLASSIFIERS.find((item) => item.terms.test(description))?.classification ?? "other";
@@ -41,18 +55,17 @@ export async function classifyIssueWithModel(root: string, description: string, 
   const deterministic = classifyIssue(description);
   if (!ctx?.modelRegistry) return deterministic;
   const config = loadConfig(root);
-  const modelRef = parseModelRef(config.modelOverrides.classifyIssue?.model);
-  if (!modelRef) return deterministic;
-  const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
-  if (!model) return deterministic;
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  const override = config.modelOverrides.classifyIssue;
+  const selected = selectModel(ctx, override);
+  if (!selected) return deterministic;
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selected.model);
   if (!auth.ok) return deterministic;
   const complete = deps.complete ?? completeSimple;
-  const response = await complete(model, {
+  const response = await complete(selected.model, {
     systemPrompt: `Classify an agent learning issue. Return only JSON: {"classification":"..."}. Allowed classifications: ${CLASSIFICATION_VALUES.join(", ")}.`,
     messages: [{ role: "user", timestamp: Date.now(), content: description }],
   }, {
-    reasoning: config.modelOverrides.classifyIssue?.thinkingLevel,
+    reasoning: selected.thinkingLevel,
     apiKey: auth.apiKey,
     headers: auth.headers,
   });
@@ -118,14 +131,12 @@ function parseDraftResponse(text: string, fallback: LearningDraft): LearningDraf
 }
 
 async function modelDraft(root: string, record: LearningRecord, fallback: LearningDraft, override: ModelOverride | undefined, ctx: ExtensionContext, deps: DraftLearningDeps): Promise<LearningDraft | undefined> {
-  const modelRef = parseModelRef(override?.model);
-  if (!modelRef) return undefined;
-  const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
-  if (!model) return undefined;
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  const selected = selectModel(ctx, override);
+  if (!selected) return undefined;
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selected.model);
   if (!auth.ok) return undefined;
   const complete = deps.complete ?? completeSimple;
-  const response = await complete(model, {
+  const response = await complete(selected.model, {
     systemPrompt: "Draft one durable, repo-local agent learning rule. Return only JSON with proposedText, rationale, and risk (low|medium|high). Keep proposedText a single markdown bullet starting with '- '. Do not include secrets or one-off task facts.",
     messages: [{
       role: "user",
@@ -139,7 +150,7 @@ async function modelDraft(root: string, record: LearningRecord, fallback: Learni
       }),
     }],
   }, {
-    reasoning: override?.thinkingLevel,
+    reasoning: selected.thinkingLevel,
     apiKey: auth.apiKey,
     headers: auth.headers,
   });

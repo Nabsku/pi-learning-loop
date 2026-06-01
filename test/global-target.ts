@@ -9,7 +9,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-global-"));
+const root = mkdtempSync(join(tmpdir(), "pi-learnings-global-"));
 const oldHome = process.env.HOME;
 process.env.HOME = root;
 const piHome = join(root, ".pi/agent");
@@ -18,7 +18,7 @@ writeFileSync(join(root, ".pi-placeholder"), "", "utf8");
 
 const configDir = join(root, ".pi");
 await import("node:fs").then(({ mkdirSync }) => mkdirSync(configDir, { recursive: true }));
-writeFileSync(join(configDir, "learning-loop.json"), JSON.stringify({
+writeFileSync(join(configDir, "learnings.json"), JSON.stringify({
   version: 1,
   learningsDir: ".pi/learnings",
   repoAgentsPath: "AGENTS.md",
@@ -86,10 +86,10 @@ await commands.learn.handler(`approve ${cliRecord.id} --confirm-global`, { cwd: 
 assert(readFileSync(join(piHome, "AGENTS.md"), "utf8").includes("CLI global approval needs the global flag."), "--confirm-global should approve global write");
 assert(existsSync(join(root, ".pi/learnings/applied", `${cliRecord.id}.json`)), "confirmed global CLI apply should move learning to applied");
 
-const unsafeConfigRoot = mkdtempSync(join(tmpdir(), "pi-learning-loop-global-unsafe-config-"));
+const unsafeConfigRoot = mkdtempSync(join(tmpdir(), "pi-learnings-global-unsafe-config-"));
 process.env.HOME = unsafeConfigRoot;
 await import("node:fs").then(({ mkdirSync }) => mkdirSync(join(unsafeConfigRoot, ".pi"), { recursive: true }));
-writeFileSync(join(unsafeConfigRoot, ".pi/learning-loop.json"), JSON.stringify({
+writeFileSync(join(unsafeConfigRoot, ".pi/learnings.json"), JSON.stringify({
   version: 1,
   learningsDir: ".pi/learnings",
   repoAgentsPath: "AGENTS.md",
