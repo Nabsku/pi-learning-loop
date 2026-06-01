@@ -14,20 +14,13 @@ Approval-gated learning loop for Pi.
 /learn pending
 /learn approve <id>
 /learn reject <id> [reason]
-/learn init-config
 ```
 
 `/learn pick` is the preferred interactive path. It opens only when invoked, lets you select a recent turn, asks for a short issue description plus optional future behavior, then creates a pending draft. It never writes `AGENTS.md`; approval still happens via `/learn approve <id>`.
 
 ## Config
 
-Config is optional. Create the default repo-local config with:
-
-```text
-/learn init-config
-```
-
-It writes `.pi/learning-loop.json`:
+Config is created automatically when the plugin loads. It writes `.pi/learning-loop.json`:
 
 ```json
 {

@@ -11,6 +11,7 @@ const commands: Record<string, Command> = {};
 const messages: Array<{ content: string; details?: unknown }> = [];
 
 learningLoop({
+  on() {},
   registerTool(tool: Tool) { tools.push(tool); },
   registerCommand(name: string, command: Command) { commands[name] = command; },
   sendMessage(message: { content: string; details?: unknown }) { messages.push(message); },

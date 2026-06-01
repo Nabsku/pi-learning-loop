@@ -4,7 +4,6 @@ import { classifyIssueWithModel, draftLearning, recommendTarget } from "./draft.
 import { runInteractiveLearn } from "./interactive.ts";
 import { bounded, createLearning, listLearnings, moveLearning, readLearning, repoRoot, saveLearning } from "./store.ts";
 import { loadConfig } from "./config.ts";
-import { initConfig } from "./config-file.ts";
 
 function renderRecord(record: ReturnType<typeof readLearning>): string {
   const lines = [
@@ -20,10 +19,10 @@ function renderRecord(record: ReturnType<typeof readLearning>): string {
 
 export function registerLearningCommand(pi: ExtensionAPI) {
   pi.registerCommand("learn", {
-    description: "Learning loop: pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config",
+    description: "Learning loop: pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]",
     getArgumentCompletions(prefix) {
       const first = prefix.trimStart().split(/\s/)[0] ?? "";
-      return ["pick", "note", "draft", "show", "pending", "approve", "reject", "init-config", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
+      return ["pick", "note", "draft", "show", "pending", "approve", "reject", "help"].filter((value) => value.startsWith(first)).map((value) => ({ value, label: value }));
     },
     async handler(args, ctx) {
       const [subRaw, ...rest] = args.trim().split(/\s/).filter(Boolean);
@@ -33,12 +32,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
       const send = (content: string, details?: unknown) => pi.sendMessage({ customType: "learning-loop", display: true, content, details });
 
       if (sub === "help") {
-        send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config\n\nUse /learn pick for the non-intrusive TUI flow: select a turn, describe the mistake, review the draft, then approve explicitly.");
-        return;
-      }
-      if (sub === "init-config") {
-        const result = initConfig(root);
-        send(result.message, result);
+        send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]\n\nUse /learn pick for the non-intrusive TUI flow: select a turn, describe the mistake, review the draft, then approve explicitly.");
         return;
       }
       if (sub === "pick" || sub === "last") {
@@ -98,7 +92,7 @@ export function registerLearningCommand(pi: ExtensionAPI) {
         send(`rejected: ${id}`, record);
         return;
       }
-      send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason] | init-config");
+      send("usage: /learn pick | note <issue> | draft <id> | show <id> | pending | approve <id> | reject <id> [reason]");
     },
   });
 }

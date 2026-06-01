@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import learningLoop from "../index.ts";
 
-type Command = { handler: (args: string, ctx: { cwd: string }) => Promise<void> };
+type Command = { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }>; handler: (args: string, ctx: { cwd: string }) => Promise<void> };
+type Handler = (event: { cwd: string; reason: "startup" | "reload" }, ctx: { cwd: string }) => void | Promise<void>;
 
 const commands: Record<string, Command> = {};
 const messages: Array<{ content: string; details?: unknown }> = [];
+const handlers: Record<string, Handler[]> = {};
 
 learningLoop({
+  on(event: string, handler: Handler) { (handlers[event] ??= []).push(handler); },
   registerTool() {},
   registerCommand(name: string, command: Command) { commands[name] = command; },
   sendMessage(message: { content: string; details?: unknown }) { messages.push(message); },
@@ -20,9 +23,11 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-config-"));
 
-await commands.learn.handler("init-config", { cwd: root });
 const configPath = join(root, ".pi/learning-loop.json");
-assert(existsSync(configPath), "init-config should create .pi/learning-loop.json");
+assert(!commands.learn.description?.includes("init-config"), "help description should not advertise init-config");
+assert(!commands.learn.getArgumentCompletions?.("init").some((item) => item.value === "init-config"), "completions should not include init-config");
+await handlers.resources_discover?.[0]?.({ cwd: root, reason: "startup" }, { cwd: root });
+assert(existsSync(configPath), "loading the plugin should create .pi/learning-loop.json");
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 assert(config.learningsDir === ".pi/learnings", "default config should set learningsDir");
 assert(config.repoAgentsPath === "AGENTS.md", "default config should set repoAgentsPath");
