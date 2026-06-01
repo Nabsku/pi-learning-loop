@@ -1,0 +1,204 @@
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { LearningClassification, LearningRecord } from "./types.ts";
+import { classifyIssue, draftLearning, recommendTarget } from "./draft.ts";
+import { bounded, createLearning, saveLearning } from "./store.ts";
+
+type MessageEntry = ReturnType<ExtensionCommandContext["sessionManager"]["getEntries"]>[number];
+
+type PickableTurn = {
+  id: string;
+  sourceTurnId?: string;
+  role: "assistant" | "tool" | "user" | "unknown";
+  timestamp: string;
+  excerpt: string;
+  label: string;
+  reason?: string;
+  evidenceTurnId?: string;
+  evidenceExcerpt?: string;
+  score: number;
+};
+
+type RawTurn = Omit<PickableTurn, "label" | "reason" | "score" | "evidenceTurnId" | "evidenceExcerpt">;
+
+function textFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object" && "text" in part && typeof part.text === "string") return part.text;
+      return "";
+    }).filter(Boolean).join(" ");
+  }
+  return "";
+}
+
+function roleFromMessage(message: unknown): PickableTurn["role"] {
+  if (message && typeof message === "object" && "role" in message) {
+    const role = String(message.role);
+    if (role === "assistant" || role === "tool" || role === "user") return role;
+  }
+  return "unknown";
+}
+
+function excerptFromEntry(entry: MessageEntry): string {
+  if (entry.type !== "message") return "";
+  const message = entry.message as { content?: unknown; toolName?: string; command?: string; output?: string };
+  return bounded(textFromContent(message.content) || message.output || message.command || "(no text)", 420).replace(/\s+/g, " ").trim();
+}
+
+function issueSignal(text: string): boolean {
+  return /\b(fail(?:ed|ing)?|error|exit code [1-9]|exception|traceback|panic|timeout|denied|blocked|not enough|red|broken)\b/i.test(text);
+}
+
+function overclaimSignal(text: string): boolean {
+  return /\b(pass(?:ed|es)?|green|fixed|done|works|verified|all checks|tests pass|ci is green|updated?|changed|edited|patched|wrote|created|modified)\b/i.test(text);
+}
+
+function fileRefs(text: string): string[] {
+  const matches = text.match(/[\w./-]+\.[A-Za-z0-9]{1,8}/g) ?? [];
+  return [...new Set(matches.map((match) => match.replace(/^`|`$/g, "")))];
+}
+
+function isTestText(text: string): boolean {
+  return /\b(test|tests|pytest|vitest|jest|pnpm test|npm test|go test|cargo test|all checks|ci)\b/i.test(text);
+}
+
+function isLintText(text: string): boolean {
+  return /\b(lint|eslint|ruff|clippy|golangci-lint|typecheck|tsc)\b/i.test(text);
+}
+
+function isFileUpdateClaim(text: string): boolean {
+  return /\b(updated?|changed|edited|patched|wrote|created|modified|fixed)\b/i.test(text) && fileRefs(text).length > 0;
+}
+
+function semanticMatchScore(claim: string, toolOutput: string): number {
+  let score = 0;
+  const claimFiles = fileRefs(claim);
+  if (claimFiles.length > 0) {
+    for (const file of claimFiles) {
+      if (toolOutput.includes(file) || toolOutput.includes(file.split("/").pop() ?? file)) score += 5;
+    }
+  }
+  if (isFileUpdateClaim(claim) && /\b(patch|write_file|old_string|file|modified|created|updated)\b/i.test(toolOutput)) score += 3;
+  if (isTestText(claim) && isTestText(toolOutput)) score += 4;
+  if (isLintText(claim) && isLintText(toolOutput)) score += 4;
+  return score;
+}
+
+function findContradictingTool(turns: RawTurn[], index: number): RawTurn | undefined {
+  const claim = turns[index]?.excerpt ?? "";
+  const candidates: RawTurn[] = [];
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = turns[cursor];
+    if (!candidate) break;
+    if (candidate.role === "assistant") break;
+    if (candidate.role === "tool" && issueSignal(candidate.excerpt)) candidates.push(candidate);
+  }
+  if (candidates.length === 0) return undefined;
+  const ranked = candidates
+    .map((candidate, order) => ({ candidate, score: semanticMatchScore(claim, candidate.excerpt), order }))
+    .sort((a, b) => b.score - a.score || a.order - b.order);
+  return ranked[0]?.candidate;
+}
+
+function qualityHint(role: PickableTurn["role"], excerpt: string, contradictingTool?: RawTurn): { score: number; reason?: string } {
+  if (role === "assistant" && overclaimSignal(excerpt) && contradictingTool) return { score: 120, reason: `after tool failure ${contradictingTool.id}` };
+  if (role === "assistant" && overclaimSignal(excerpt)) return { score: 70, reason: "verification claim" };
+  if (role === "tool" && issueSignal(excerpt)) return { score: 60, reason: "tool failure" };
+  if (role === "assistant") return { score: 30 };
+  if (role === "tool") return { score: 20 };
+  return { score: 5 };
+}
+
+function formatTurnLabel(turn: Omit<PickableTurn, "label">): string {
+  if (turn.id === "__last_assistant__") return `↩ Last assistant turn · ${bounded(turn.excerpt, 90)}`;
+  const prefix = turn.reason ? `⚠ ${turn.role}` : turn.role;
+  const reason = turn.reason ? ` · ${turn.reason}` : "";
+  const evidence = turn.evidenceExcerpt ? ` ↯ ${bounded(turn.evidenceExcerpt, 64)}` : "";
+  return `${prefix}${reason}${evidence} · ${bounded(turn.excerpt, 104)}`;
+}
+
+export function recentPickableTurns(ctx: ExtensionCommandContext, limit = 18): PickableTurn[] {
+  const entries = ctx.sessionManager.getEntries();
+  const rawTurns: RawTurn[] = entries
+    .filter((entry) => entry.type === "message")
+    .map((entry) => {
+      const role = roleFromMessage(entry.message);
+      const excerpt = excerptFromEntry(entry);
+      return { id: entry.id, role, timestamp: entry.timestamp, excerpt };
+    })
+    .filter((turn): turn is RawTurn => Boolean(turn.excerpt) && turn.role !== "unknown");
+
+  const turns = rawTurns.map((turn, index) => {
+    const contradictingTool = findContradictingTool(rawTurns, index);
+    const hint = qualityHint(turn.role, turn.excerpt, contradictingTool);
+    const recency = Math.min(index, 20);
+    const pickable = {
+      ...turn,
+      score: hint.score + recency,
+      reason: hint.reason,
+      evidenceTurnId: contradictingTool?.id,
+      evidenceExcerpt: contradictingTool?.excerpt,
+    } satisfies Omit<PickableTurn, "label">;
+    return { ...pickable, label: formatTurnLabel(pickable) } satisfies PickableTurn;
+  });
+
+  const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
+  const fastPath = lastAssistant
+    ? [{ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, reason: undefined, label: formatTurnLabel({ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, reason: undefined }) }]
+    : [];
+
+  const ranked = [...turns].sort((a, b) => b.score - a.score).slice(0, limit);
+  return [...ranked, ...fastPath];
+}
+
+function renderReview(record: LearningRecord): string {
+  return [
+    `created: ${record.id}`,
+    `source: ${record.source.role} turn ${record.source.turnId ?? "unknown"}`,
+    `issue: ${record.issue.description}`,
+    record.issue.desiredFutureBehavior ? `future: ${record.issue.desiredFutureBehavior}` : undefined,
+    "",
+    "review:",
+    `target: ${record.recommendedTarget.kind}:${record.recommendedTarget.path}`,
+    `classification: ${record.classification}`,
+    `rule: ${record.draft?.proposedText ?? "(none)"}`,
+    `rationale: ${record.draft?.rationale ?? "(none)"}`,
+    "",
+    `approve with: /learn approve ${record.id}`,
+    `reject with: /learn reject ${record.id} <reason>`,
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+export async function runInteractiveLearn(root: string, ctx: ExtensionCommandContext): Promise<{ ok: true; record: LearningRecord; message: string } | { ok: false; message: string }> {
+  if (!ctx.hasUI) {
+    return { ok: false, message: "UI picker unavailable in this mode. Use: /learn note <what went wrong>" };
+  }
+
+  const turns = recentPickableTurns(ctx);
+  if (turns.length === 0) {
+    return { ok: false, message: "No selectable session turns found. Use: /learn note <what went wrong>" };
+  }
+
+  const labels = turns.map((turn) => turn.label);
+  const pickedLabel = await ctx.ui.select("Select the bad turn to learn from", labels);
+  if (!pickedLabel) return { ok: false, message: "Cancelled. No learning created." };
+  const picked = turns[labels.indexOf(pickedLabel)];
+  if (!picked) return { ok: false, message: "Cancelled. Selected turn was not found." };
+
+  const issue = (await ctx.ui.input("What went wrong?", "Short concrete mistake, e.g. claimed tests passed without running them"))?.trim();
+  if (!issue) return { ok: false, message: "Cancelled. No learning created." };
+
+  const desiredFutureBehavior = (await ctx.ui.editor("Future behavior rule input", "Optional: what should Pi do next time? Keep it durable, not one-off."))?.trim() || undefined;
+  const classification: LearningClassification = classifyIssue(`${issue}\n${picked.excerpt}\n${desiredFutureBehavior ?? ""}`);
+  const record = createLearning(root, {
+    source: { selector: "turn-id", turnId: picked.sourceTurnId ?? picked.id, role: picked.role, excerpt: bounded(picked.excerpt) },
+    issue: { description: bounded(issue, 1000), desiredFutureBehavior: desiredFutureBehavior ? bounded(desiredFutureBehavior, 1000) : undefined },
+    classification,
+    recommendedTarget: recommendTarget(classification),
+  });
+  record.draft = draftLearning(root, record);
+  saveLearning(root, record);
+
+  return { ok: true, record, message: renderReview(record) };
+}

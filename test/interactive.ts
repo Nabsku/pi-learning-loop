@@ -1,0 +1,92 @@
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import learningLoop from "../index.ts";
+
+type Command = { handler: (args: string, ctx: Record<string, unknown>) => Promise<void> };
+
+const commands: Record<string, Command> = {};
+const messages: Array<{ content: string; details?: unknown }> = [];
+
+learningLoop({
+  registerTool() {},
+  registerCommand(name: string, command: Command) { commands[name] = command; },
+  sendMessage(message: { content: string; details?: unknown }) { messages.push(message); },
+} as never);
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+const root = mkdtempSync(join(tmpdir(), "pi-learning-loop-ui-"));
+writeFileSync(join(root, "AGENTS.md"), "# Repo Rules\n", "utf8");
+
+const uiCalls: string[] = [];
+const ctx = {
+  cwd: root,
+  hasUI: true,
+  sessionManager: {
+    getEntries() {
+      return [
+        {
+          id: "u1",
+          type: "message",
+          timestamp: "2026-05-31T10:00:00.000Z",
+          message: { role: "user", content: "Please fix the tests." },
+        },
+        {
+          id: "a1",
+          type: "message",
+          timestamp: "2026-05-31T10:01:00.000Z",
+          message: { role: "assistant", content: "All tests pass now." },
+        },
+        {
+          id: "t1",
+          type: "message",
+          timestamp: "2026-05-31T10:02:00.000Z",
+          message: { role: "tool", content: "pnpm test failed with exit code 1" },
+        },
+      ];
+    },
+  },
+  ui: {
+    async select(title: string, options: string[]) {
+      uiCalls.push(`select:${title}:${options.join("|")}`);
+      assert(title.includes("Select the bad turn"), "picker title should explain the task");
+      assert(options.some((option) => option.includes("assistant") && option.includes("All tests pass")), "picker should include assistant turn excerpts");
+      return options.find((option) => option.includes("assistant"));
+    },
+    async input(title: string, placeholder?: string) {
+      uiCalls.push(`input:${title}:${placeholder ?? ""}`);
+      assert(title.includes("What went wrong"), "issue prompt should be explicit");
+      return "Pi claimed tests passed when the tool output showed failure";
+    },
+    async editor(title: string, prefill?: string) {
+      uiCalls.push(`editor:${title}:${prefill ?? ""}`);
+      assert(title.includes("Future behavior"), "desired behavior editor should be explicit");
+      return "Never claim tests passed unless the latest actual test command exited 0.";
+    },
+  },
+};
+
+await commands.learn.handler("pick", ctx);
+
+assert(uiCalls.length === 3, "interactive picker should use exactly select, input, editor; no background widgets/hooks");
+const content = messages.at(-1)?.content ?? "";
+assert(content.includes("created:"), "pick should create a learning record");
+assert(content.includes("review:"), "pick should show a review summary");
+assert(content.includes("approve with: /learn approve"), "pick should leave approval explicit");
+const id = /learn_[A-Za-z0-9_Z]+_[a-f0-9]{6}/.exec(content)?.[0];
+assert(id, "created message should include id");
+assert(existsSync(join(root, ".pi/learnings/pending", `${id}.json`)), "pick should write pending record only");
+const record = JSON.parse(readFileSync(join(root, ".pi/learnings/pending", `${id}.json`), "utf8"));
+assert(record.source.selector === "turn-id", "record should preserve selected turn id source");
+assert(record.source.turnId === "a1", "record should preserve selected entry id");
+assert(record.issue.desiredFutureBehavior?.includes("Never claim tests passed"), "desired future behavior should be saved");
+assert(record.draft?.proposedText, "pick should draft a reviewable rule");
+assert(!readFileSync(join(root, "AGENTS.md"), "utf8").includes(record.draft.proposedText), "pick must not write AGENTS.md");
+
+await commands.learn.handler("pick", { cwd: root, hasUI: false });
+assert(messages.at(-1)?.content.includes("UI picker unavailable"), "non-UI mode should fall back without throwing");
+
+console.log(`interactive root=${root} id=${id}`);
