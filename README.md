@@ -4,6 +4,40 @@ Approval-gated learning capture for Pi.
 
 `/learn` turns a concrete Pi mistake into a proposed durable rule. It drafts first, shows the target and proposed text, and only writes after explicit approval.
 
+## Quickstart
+
+Install from GitHub in Pi:
+
+```text
+pi install git:github.com/Nabsku/pi-learnings
+/reload
+```
+
+Capture something concrete that went wrong:
+
+```text
+/learn note Claimed tests passed without running the test command
+```
+
+Then open the review flow:
+
+```text
+/learn
+```
+
+From the TUI, review the proposed rule, inspect the target file, edit if needed, and approve or reject it. Approval writes the rule; capture/draft/list tools never do.
+
+Default files created in the current repo:
+
+```text
+.pi/learnings.json
+.pi/learnings/pending/<id>.json
+.pi/learnings/applied/<id>.json
+.pi/learnings/rejected/<id>.json
+```
+
+Approved repo-local rules are inserted into `AGENTS.md` under `## Agent Learnings` unless `repoAgentsPath` points somewhere else.
+
 ## Commands
 
 ```text
@@ -138,6 +172,18 @@ learning_list
 ```
 
 There is intentionally no apply/write tool. Applying a rule requires the TUI review flow or slash-command confirmation.
+
+## Trust model
+
+The plugin is designed so agents can help identify and draft learnings, but humans decide what becomes durable instruction.
+
+- Model output is draft-only. It can propose text; it cannot approve itself.
+- Registered tools are capture/draft/list only. There is no apply/write tool.
+- Repo-local writes require TUI approval or the exact CLI confirmation `/learn approve <id> --confirm`.
+- Global Pi writes require an explicit global target plus stronger confirmation: TUI confirmation or `/learn approve <id> --confirm-global`.
+- Global writes are constrained to the configured `~/.pi/agent/AGENTS.md` and `~/.pi/agent/APPEND_SYSTEM.md` targets.
+- Repo paths must stay inside the repo. Escaping paths are ignored and replaced with defaults.
+- Raw transcript excerpts are bounded by `maxExcerptChars` and should not be copied into durable rules.
 
 ## Safety model
 

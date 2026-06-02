@@ -36,14 +36,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Test
-        run: pnpm test
-
-      - name: Check package contents
-        run: npm pack --dry-run
-
-      - name: Check whitespace
-        run: git diff --check
+      - name: Run CI checks
+        run: pnpm run test:ci
