@@ -9,8 +9,10 @@ import { draftLearning } from "../src/draft.ts";
 const root = mkdtempSync(join(tmpdir(), "pll-model-draft-"));
 writeFileSync(join(root, ".pi-learnings-test-root"), "");
 mkdirSync(join(root, ".pi"), { recursive: true });
+const customLearningPrompt = "Write terse repo rules for this team. Return JSON only.";
 writeFileSync(join(root, ".pi/learnings.json"), JSON.stringify({
   version: 1,
+  learningPrompt: customLearningPrompt,
   modelOverrides: {
     draftRule: { model: "fake-provider/fake-model", thinkingLevel: "high" },
   },
@@ -58,6 +60,7 @@ record.draft = await draftLearning(root, record, ctx, {
 assert.equal(calls.length, 1);
 assert.equal(calls[0]?.model, fakeModel);
 assert.deepEqual(calls[0]?.options, { reasoning: "high", apiKey: "fake-key", headers: { "x-test": "yes" } });
+assert.equal((calls[0]?.context as { systemPrompt?: string }).systemPrompt, customLearningPrompt);
 assert.match(JSON.stringify(calls[0]?.context), /Claimed tests passed/);
 assert.equal(record.draft.proposedText, "- Only report tests as passed after running the exact test command and seeing a successful exit.");
 assert.equal(record.draft.rationale, "Uses the reported failed test evidence.");
