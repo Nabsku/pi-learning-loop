@@ -233,6 +233,25 @@ function suggestedIssue(turn: PickableTurn): string {
   return "This turn exposed behavior Pi should improve.";
 }
 
+function selectedTurnsIssue(turns: PickableTurn[]): string {
+  if (turns.length === 1) return suggestedIssue(turns[0]!);
+  return "Multiple selected turns together show behavior Pi should improve.";
+}
+
+function combinedSourceRole(turns: PickableTurn[]): PickableTurn["role"] {
+  const first = turns[0]?.role ?? "unknown";
+  return turns.every((turn) => turn.role === first) ? first : "unknown";
+}
+
+function combinedSourceExcerpt(turns: PickableTurn[]): string {
+  return turns.map((turn, index) => [
+    `--- selected turn ${index + 1}/${turns.length} · ${turn.role} · ${turn.sourceTurnId ?? turn.id} ---`,
+    turn.excerpt,
+    turn.evidenceExcerpt ? "evidence excerpt:" : undefined,
+    turn.evidenceExcerpt,
+  ].filter((line): line is string => line !== undefined).join("\n")).join("\n\n");
+}
+
 export function recentPickableTurns(ctx: ExtensionCommandContext, limit = 18): PickableTurn[] {
   const entries = ctx.sessionManager.getEntries();
   const cwd = typeof (ctx as { cwd?: unknown }).cwd === "string" ? (ctx as { cwd: string }).cwd : process.cwd();
@@ -463,31 +482,45 @@ export async function runInteractiveLearn(root: string, ctx: ExtensionCommandCon
     return { ok: false, message: "No selectable session turns found. Use: /learn note <what went wrong>" };
   }
 
-  let picked: PickableTurn | undefined;
-  while (!picked) {
-    const labels = turns.map((turn) => turn.label);
-    const pickedLabel = await ctx.ui.select("Select the turn to learn from", labels);
+  const picked: PickableTurn[] = [];
+  while (true) {
+    const selectedIds = new Set(picked.map((turn) => turn.id));
+    const labels = turns
+      .filter((turn) => !selectedIds.has(turn.id))
+      .map((turn) => turn.label);
+    const pickerOptions = picked.length > 0 ? [`Use ${picked.length} selected`, ...labels] : labels;
+    const pickedLabel = await ctx.ui.select("Select the turn to learn from", pickerOptions);
     if (!pickedLabel) return { ok: false, message: "Cancelled. No learning created." };
-    const candidate = turns[labels.indexOf(pickedLabel)];
+    if (pickedLabel.startsWith("Use ") && pickedLabel.endsWith(" selected")) break;
+    const candidate = turns.find((turn) => turn.label === pickedLabel);
     if (!candidate) return { ok: false, message: "Cancelled. Selected turn was not found." };
 
     await ctx.ui.editor("Read-only preview: selected turn", renderTurnPreview(candidate));
-    const action = await ctx.ui.select("Use this turn?", ["Use this turn", "Back to picker", "Cancel"]);
-    if (action === "Use this turn") picked = candidate;
-    else if (action === "Back to picker") continue;
-    else return { ok: false, message: "Cancelled. No learning created." };
+    const action = await ctx.ui.select("Use this turn?", ["Use selected turns", "Add this turn and pick another", "Back to picker", "Cancel"]);
+    if (action === "Use selected turns" || action === "Use this turn") {
+      if (!picked.some((turn) => turn.id === candidate.id)) picked.push(candidate);
+      break;
+    }
+    if (action === "Add this turn and pick another") {
+      if (!picked.some((turn) => turn.id === candidate.id)) picked.push(candidate);
+      continue;
+    }
+    if (action === "Back to picker") continue;
+    return { ok: false, message: "Cancelled. No learning created." };
   }
 
-  const issue = (await ctx.ui.input("What went wrong?", suggestedIssue(picked)))?.trim();
+  if (picked.length === 0) return { ok: false, message: "Cancelled. No learning created." };
+  const combinedExcerpt = combinedSourceExcerpt(picked);
+  const issue = (await ctx.ui.input("What went wrong?", selectedTurnsIssue(picked)))?.trim();
   if (!issue) return { ok: false, message: "Cancelled. No learning created." };
 
   const desiredFutureBehavior = (await ctx.ui.editor("What should Pi do differently next time?", "Optional: keep it durable, not one-off."))?.trim() || undefined;
-  const classification: LearningClassification = await classifyIssueWithModel(root, `${issue}\n${picked.excerpt}\n${desiredFutureBehavior ?? ""}`, ctx);
+  const classification: LearningClassification = await classifyIssueWithModel(root, `${issue}\n${combinedExcerpt}\n${desiredFutureBehavior ?? ""}`, ctx);
   const config = loadConfig(root);
   const target = recommendTarget(classification);
   if (target.kind === "repo-agents") target.path = config.repoAgentsPath;
   const record = createLearning(root, {
-    source: { selector: "turn-id", turnId: picked.sourceTurnId ?? picked.id, role: picked.role, excerpt: bounded(picked.excerpt, config.maxExcerptChars) },
+    source: { selector: "turn-id", turnId: picked.map((turn) => turn.sourceTurnId ?? turn.id).join(","), role: combinedSourceRole(picked), excerpt: bounded(combinedExcerpt, config.maxExcerptChars) },
     issue: { description: bounded(issue, 1000), desiredFutureBehavior: desiredFutureBehavior ? bounded(desiredFutureBehavior, 1000) : undefined },
     classification,
     recommendedTarget: target,

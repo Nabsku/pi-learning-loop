@@ -66,8 +66,8 @@ const ctx = {
         return options[0];
       }
       assert(title === "Use this turn?", "preview confirmation should be asked after full preview");
-      assert(options.join("|") === "Use this turn|Back to picker|Cancel", "preview confirmation should offer use/back/cancel");
-      return "Use this turn";
+      assert(options.join("|") === "Use selected turns|Add this turn and pick another|Back to picker|Cancel", "preview confirmation should offer use/add/back/cancel");
+      return "Use selected turns";
     },
     async input(title: string, placeholder?: string) {
       uiCalls.push(`input:${title}:${placeholder ?? ""}`);
