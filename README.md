@@ -62,7 +62,8 @@ You can point repo-local rules somewhere else with `repoAgentsPath`.
 
 The main flow. Opens the TUI for:
 
-- picking a recent suspicious turn
+- picking a recent suspicious Pi turn
+- picking completed `pi-subagents` results from the session
 - reviewing pending drafts
 - browsing past learnings
 - writing a quick note

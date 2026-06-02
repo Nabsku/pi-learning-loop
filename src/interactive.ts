@@ -17,6 +17,7 @@ type PickableTurn = {
   reason?: string;
   evidenceTurnId?: string;
   evidenceExcerpt?: string;
+  source: "session" | "subagent";
   score: number;
 };
 
@@ -34,7 +35,12 @@ function textFromContent(content: unknown): string {
   return "";
 }
 
+function isSubagentMessage(message: unknown): boolean {
+  return Boolean(message && typeof message === "object" && "customType" in message && String((message as { customType?: unknown }).customType) === "subagent-notification");
+}
+
 function roleFromMessage(message: unknown): PickableTurn["role"] {
+  if (isSubagentMessage(message)) return "assistant";
   if (message && typeof message === "object" && "role" in message) {
     const role = String(message.role);
     if (role === "assistant" || role === "tool" || role === "user") return role;
@@ -44,8 +50,31 @@ function roleFromMessage(message: unknown): PickableTurn["role"] {
 
 function excerptFromEntry(entry: MessageEntry): string {
   if (entry.type !== "message") return "";
-  const message = entry.message as { content?: unknown; toolName?: string; command?: string; output?: string };
+  const message = entry.message as { content?: unknown; toolName?: string; command?: string; output?: string; details?: Record<string, unknown>; customType?: unknown };
+  if (isSubagentMessage(message)) {
+    const details = message.details ?? {};
+    const pieces = [
+      details.description ? `subagent: ${String(details.description)}` : "subagent result",
+      details.status ? `status: ${String(details.status)}` : undefined,
+      details.error ? `error: ${String(details.error)}` : undefined,
+      details.resultPreview ? String(details.resultPreview) : undefined,
+      details.outputFile ? `transcript: ${String(details.outputFile)}` : undefined,
+      textFromContent(message.content),
+    ];
+    return bounded(pieces.filter(Boolean).join("\n"), 1200).replace(/\s+/g, " ").trim();
+  }
   return bounded(textFromContent(message.content) || message.output || message.command || "(no text)", 1200).replace(/\s+/g, " ").trim();
+}
+
+function sourceTurnIdFromMessage(message: unknown): string | undefined {
+  if (!isSubagentMessage(message)) return undefined;
+  const details = (message as { details?: Record<string, unknown> }).details;
+  const id = details?.id;
+  return typeof id === "string" && id.trim() ? id.trim() : undefined;
+}
+
+function sourceFromMessage(message: unknown): PickableTurn["source"] {
+  return isSubagentMessage(message) ? "subagent" : "session";
 }
 
 function issueSignal(text: string): boolean {
@@ -123,6 +152,7 @@ function formatTurnLabel(turn: Omit<PickableTurn, "label">, turnsAgo = 0): strin
   const disambiguator = `#${turn.id}`;
   const prefix = turn.id === "__last_assistant__" ? "[last]" : turn.reason ? "[likely]" : "[recent]";
   if (prefix === "[last]") return "[last] last assistant response";
+  if (turn.source === "subagent") return `[likely] subagent result · ${reasonCategory(turn)} · ${disambiguator}`;
   if (prefix === "[likely]" && turn.reason?.startsWith("after tool failure")) return `[likely] claimed success after failed tool · assistant · ${disambiguator}`;
   if (prefix === "[likely]" && turn.reason === "verification claim") return `[likely] verification claim · ${turn.role} · ${disambiguator}`;
   if (prefix === "[likely]" && turn.reason === "tool failure") return `[likely] failed tool output · ${turn.role} · ${disambiguator}`;
@@ -160,7 +190,10 @@ export function recentPickableTurns(ctx: ExtensionCommandContext, limit = 18): P
     .map((entry) => {
       const role = roleFromMessage(entry.message);
       const excerpt = excerptFromEntry(entry);
-      return { id: entry.id, role, timestamp: entry.timestamp, excerpt };
+      const sourceTurnId = sourceTurnIdFromMessage(entry.message);
+      const turn: RawTurn = { id: entry.id, role, timestamp: entry.timestamp, excerpt, source: sourceFromMessage(entry.message) };
+      if (sourceTurnId) turn.sourceTurnId = sourceTurnId;
+      return turn;
     })
     .filter((turn): turn is RawTurn => Boolean(turn.excerpt) && turn.role !== "unknown");
 
@@ -183,7 +216,7 @@ export function recentPickableTurns(ctx: ExtensionCommandContext, limit = 18): P
     ? [{ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000, label: formatTurnLabel({ ...lastAssistant, id: "__last_assistant__", sourceTurnId: lastAssistant.id, score: lastAssistant.score + 10_000 }) }]
     : [];
 
-  const dedupedTurns = lastAssistant ? turns.filter((turn) => turn.id !== lastAssistant.id) : turns;
+  const dedupedTurns = lastAssistant && lastAssistant.source !== "subagent" ? turns.filter((turn) => turn.id !== lastAssistant.id) : turns;
   const ranked = [...dedupedTurns].sort((a, b) => b.score - a.score).slice(0, limit);
   return [...fastPath, ...ranked];
 }
